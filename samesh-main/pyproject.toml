@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "samesh"
+version = "0.0.1"
+description = "Segment Any Mesh"
+readme = "README.md"
+requires-python = ">=3.12.0"
+classifiers = [
+    "Programming Language :: Python",
+]
+dependencies = [
+    "pandas",
+    "omegaconf",
+    "igraph",
+    "networkx",
+    "pyrender",
+    "pymeshlab",
+    "trimesh",
+    "lightning",
+    "tqdm",
+    "scikit-learn",
+    "natsort",
+    "numpy==1.26.4",
+    "torch==2.3.1",
+    "torchvision==0.18.1",
+    "torchtyping",
+    "matplotlib",
+    "opencv-python",
+    "transformers",
+]
+
+# Install PyOpenGL==3.1.7 if pyrender errors
+
+[project.optional-dependencies]
+
+# Development dependencies
+dev = []
+
+# Install SAM2 with --no-build-isolation flag if build errors
+
+[project.scripts]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["samesh*"]

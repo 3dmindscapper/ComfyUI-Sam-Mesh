@@ -1,0 +1,70 @@
+# Dependencies derived from samesh (pyproject.toml)
+# Note: samesh requires Python >= 3.12.0
+pandas
+omegaconf
+igraph
+networkx
+pyrender
+# Note: If pyrender install fails or causes errors, try installing PyOpenGL manually first: pip install PyOpenGL==3.1.7
+pymeshlab
+trimesh
+lightning
+tqdm
+scikit-learn
+natsort
+numpy>=1.26.4
+torch>=2.3.1
+torchvision>=0.18.1
+# Adding torchaudio as it's common in torch environments
+torchaudio
+torchtyping
+matplotlib
+opencv-python
+transformers
+
+# Added for model downloading
+huggingface_hub
+requests
+pathlib
+
+# PyTorch Geometric dependencies (like torch_scatter)
+# Samesh might need these indirectly via dependencies or the SAM2 submodule.
+# Installation often requires specific commands based on PyTorch/CUDA version.
+# Please follow the official instructions at: https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html
+# Example commands (CHECK YOUR VERSIONS!):
+# pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
+# (Replace ${TORCH} with your PyTorch version like 2.3.0 and ${CUDA} with your CUDA version like cu118 or cu121 or cpu)
+
+# If you encounter issues, consider pinning versions closer to the ones specified in
+# ComfyUI-Sam-Mesh/samesh-main/samesh-main/pyproject.toml
+
+# Add dependencies here
+# You might need to specify a specific samesh version or installation method
+# e.g., git+https://github.com/facebookresearch/samesh.git or similar
+# samesh # Placeholder - Check samesh installation instructions 
+
+# Core ComfyUI dependencies (if any - add if needed)
+
+# SamMesh dependencies
+# Install samesh separately from its directory:
+# cd ComfyUI-Sam-Mesh/samesh-main/samesh-main
+# pip install -e . 
+# Or from the workspace root:
+# pip install -e ComfyUI-Sam-Mesh/samesh-main/samesh-main
+
+# Direct dependencies needed by the nodes themselves (besides samesh)
+# We already added torch/torchvision/torchaudio, but samesh specifies exact versions.
+# It's often best to align versions if possible, but ComfyUI might have its own requirements.
+# Let's keep the original torch entries for now, but be aware of potential conflicts. 
+
+# Add Pillow for image manipulation in the renderer node
+Pillow
+# Add pyrender for rendering meshes
+pyrender
+hydra-core==1.3.2
+torch>=2.1.1
+torchvision>=0.16.1
+torchaudio>=2.1.1
+# PyTorch3D
+fvcore
+iopath>=0.1.8 
