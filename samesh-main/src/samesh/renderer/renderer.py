@@ -34,7 +34,7 @@ from samesh.utils.mesh import duplicate_verts
 from samesh.renderer.shader_programs import *
 
 
-def colormap_faces(faces: NumpyTensor['h w'], background=np.array([255, 255, 255])) -> Image.Image:
+def colormap_faces(faces, background=np.array([255, 255, 255])) -> Image.Image:
     """
     Given a face id map, color each face with a random color.
     """
@@ -46,7 +46,7 @@ def colormap_faces(faces: NumpyTensor['h w'], background=np.array([255, 255, 255
     return Image.fromarray(image)
 
 
-def colormap_norms(norms: NumpyTensor['h w'], background=np.array([255, 255, 255])) -> Image.Image:
+def colormap_norms(norms, background=np.array([255, 255, 255])) -> Image.Image:
     """
     Given a normal map, color each normal with a color.
     """
@@ -114,7 +114,7 @@ class Renderer:
         
     def render(
         self, 
-        pose: HomogeneousTransform, 
+        pose: np.ndarray, 
         lightdir=np.array([0.0, 0.0, 1.0]), uv_map=False, interpolate_norms=True, blur_matte=False
     ) -> dict:
         """
@@ -134,17 +134,17 @@ class Renderer:
         raw_faces, raw_depth = render('faceids', self.scene_faceid)
         raw_bcent, raw_depth = render('barycnt', self.scene_faceid)
 
-        def render_norms(norms: NumpyTensor['h w 3']) -> NumpyTensor['h w 3']:
+        def render_norms(norms) -> np.ndarray:
             """
             """
             return np.clip((norms / 255.0 - 0.5) * 2, -1, 1)
 
-        def render_depth(depth: NumpyTensor['h w'], offset=2.8, alpha=0.8) -> NumpyTensor['h w']:
+        def render_depth(depth, offset=2.8, alpha=0.8) -> np.ndarray:
             """
             """
             return np.where(depth > 0, alpha * (1.0 - range_norm(depth, offset=offset)), 1)
 
-        def render_faces(faces: NumpyTensor['h w 3']) -> NumpyTensor['h w']:
+        def render_faces(faces) -> np.ndarray:
             """
             """
             faces = faces.astype(np.int32)
@@ -152,27 +152,46 @@ class Renderer:
             faces[faces == (256 ** 3 - 1)] = -1 # set background to -1
             return faces
 
-        def render_bcent(bcent: NumpyTensor['h w 3']) -> NumpyTensor['h w 3']:
+        def render_bcent(bcent) -> np.ndarray:
             """
             """
             return np.clip(bcent / 255.0, 0, 1)
 
         def render_matte(
-            norms: NumpyTensor['h w 3'],
-            depth: NumpyTensor['h w'],
-            faces: NumpyTensor['h w'],
-            bcent: NumpyTensor['h w 3'],
+            norms,
+            depth,
+            faces,
+            bcent,
             alpha=0.5, beta=0.25, gaussian_kernel_width=5, gaussian_sigma=1,
-        ) -> NumpyTensor['h w 3']:
+        ) -> np.ndarray:
             """
             """
+            interpolated_norms = norms.copy() # Start with original norms
             if interpolate_norms: # NOTE requires process=True
-                verts_index = self.tmesh.faces[faces.reshape(-1)]    # (n, 3)
-                verts_norms = self.tmesh.vertex_normals[verts_index] # (n, 3, 3)
-                norms = np.sum(verts_norms * bcent.reshape(-1, 3, 1), axis=1)
-                norms = norms.reshape(bcent.shape)
+                num_faces = self.tmesh.faces.shape[0]
+                # Create a mask for valid face indices (ignore -1 background and out-of-bounds)
+                valid_faces_mask = (faces >= 0) & (faces < num_faces)
+                
+                # Only process pixels with valid face indices
+                if np.any(valid_faces_mask):
+                    valid_pixel_indices = np.where(valid_faces_mask.reshape(-1))[0]
+                    valid_face_values = faces.reshape(-1)[valid_pixel_indices]
+                    
+                    # Get vertex indices and normals for valid faces
+                    verts_index = self.tmesh.faces[valid_face_values] # (n_valid, 3)
+                    verts_norms = self.tmesh.vertex_normals[verts_index] # (n_valid, 3, 3)
+                    
+                    # Get barycentric coordinates for valid pixels
+                    valid_bcent = bcent.reshape(-1, 3)[valid_pixel_indices] # (n_valid, 3)
+                    
+                    # Calculate interpolated norms for valid pixels
+                    calculated_norms_flat = np.sum(verts_norms * valid_bcent[:, :, None], axis=1) # (n_valid, 3)
+                    
+                    # Place calculated norms back into the correct spots in the full image array
+                    interpolated_norms.reshape(-1, 3)[valid_pixel_indices] = calculated_norms_flat
 
-            diffuse = np.sum(norms * lightdir, axis=2)
+            # Use the potentially updated interpolated_norms for diffuse calculation
+            diffuse = np.sum(interpolated_norms * lightdir, axis=2)
             diffuse = np.clip(diffuse, -1, 1)
             matte = 255 * (diffuse[:, :, None] * alpha + beta)
             matte = np.where(depth[:, :, None] > 0, matte, 255)
@@ -210,7 +229,7 @@ def render_multiview(
     else:
         views = sample_view_matrices_polyhedra(camera_generation_method, lookat_position=lookat_position_torch, **sampling_args).numpy()
     
-    def compute_lightdir(pose: HomogeneousTransform) -> NumpyTensor[3]:
+    def compute_lightdir(pose: np.ndarray) -> np.ndarray:
         """
         """
         lightdir = pose[:3, 3] - (lookat_position)
