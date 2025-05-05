@@ -411,14 +411,14 @@ class SamMeshSegmenter:
         try:
              comfy_base = folder_paths.base_path
              env['COMFYUI_BASE_PATH'] = comfy_base
-             # Add ComfyUI base and its parent to PYTHONPATH for the worker, just in case
-             python_path = env.get('PYTHONPATH', '')
-             paths_to_add = [comfy_base, os.path.dirname(comfy_base)]
-             # Also add node's samesh paths explicitly if needed, though worker script does it too
-             # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "src"))
-             # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "third_party", "segment-anything-2"))
-             env['PYTHONPATH'] = os.pathsep.join([p for p in paths_to_add if p] + [python_path])
-
+             # # Add ComfyUI base and its parent to PYTHONPATH for the worker, just in case
+             # python_path = env.get('PYTHONPATH', '')
+             # paths_to_add = [comfy_base, os.path.dirname(comfy_base)]
+             # # Also add node's samesh paths explicitly if needed, though worker script does it too
+             # # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "src"))
+             # # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "third_party", "segment-anything-2"))
+             # env['PYTHONPATH'] = os.pathsep.join([p for p in paths_to_add if p] + [python_path])
+             # Let the worker script handle sys.path modifications
         except AttributeError:
              print("Warning: Could not get ComfyUI base path via folder_paths.base_path. Path resolution inside worker might fail.")
              env['COMFYUI_BASE_PATH'] = '' # Send empty string

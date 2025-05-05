@@ -33,7 +33,6 @@ if comfyui_base_path:
 try:
     from omegaconf import OmegaConf
     from samesh.models.sam_mesh import segment_mesh as segment_mesh_samesh_func
-    from samesh.models.sam import SAM_MODELS # Import SAM_MODELS dict
     print(f"Worker: Successfully imported samesh modules.")
     # print(f"Worker sys.path: {sys.path}") # Debug path
 except ImportError as e:
@@ -133,18 +132,9 @@ def main():
         config.sam.sam.checkpoint = args.sam_checkpoint_path
 
         # Determine the correct config filename from the checkpoint path
-        selected_model_name = None
-        for name, info in SAM_MODELS.items():
-             if os.path.basename(args.sam_checkpoint_path) == info["checkpoint_filename"]:
-                  selected_model_name = name
-                  break
-        if selected_model_name:
-             config.sam.sam.model_config = SAM_MODELS[selected_model_name]["config_filename"]
-             print(f"Worker: Setting model_config in samesh config to: {config.sam.sam.model_config}")
-        else:
-             print(f"Worker Warning: Could not determine SAM model type from checkpoint path: {args.sam_checkpoint_path}. Using basename of provided config path: {os.path.basename(args.sam_model_config_path)}", file=sys.stderr)
-             config.sam.sam.model_config = os.path.basename(args.sam_model_config_path)
-
+        config_filename = os.path.basename(args.sam_model_config_path)
+        config.sam.sam.model_config = config_filename
+        print(f"Worker: Setting model_config in samesh config to: {config_filename}")
 
         # Handle target_labels
         target_labels_arg = None if args.target_labels < 0 else args.target_labels
