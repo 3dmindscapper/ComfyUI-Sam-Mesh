@@ -7,6 +7,7 @@ import trimesh # Used by samesh and useful for type hints
 import copy
 import json
 import numpy as np
+import subprocess # Added for running the worker script
 from PIL import Image
 from omegaconf import OmegaConf, DictConfig
 from huggingface_hub import hf_hub_download
@@ -39,30 +40,40 @@ for p in sys.path:
          # print(f"Debug: Error checking sys.path entry '{p}': {e}")
          pass # Ignore problematic paths
 
-comfyui_samesh_node_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+# Path to the current custom node directory
+comfyui_samesh_node_dir = os.path.dirname(os.path.realpath(__file__))
+# Path to the worker script
+WORKER_SCRIPT_PATH = os.path.join(comfyui_samesh_node_dir, "_run_segmentation_worker.py")
+
 # Debug: Print the calculated base directory for the node
 print(f"ComfyUI-Sam-Mesh Node Dir: {comfyui_samesh_node_dir}")
 
 # Guard imports based on the FOUND path
+# We still need these for type hints and potentially for reloading the mesh later
 read_mesh = None
-segment_mesh_samesh_func = None
+# segment_mesh_samesh_func = None # No longer needed directly in the node
 SamModelMesh = None
 remove_texture = None
 colormap_faces_mesh = None
 if samesh_src_dir_found: # Use the flag set in the loop
     try:
+        # Only import what's needed by nodes *other* than Segmenter, or for loading results
         from samesh.data.loaders import read_mesh, remove_texture
-        from samesh.models.sam_mesh import segment_mesh as segment_mesh_samesh_func, SamModelMesh, colormap_faces_mesh
+        from samesh.models.sam_mesh import SamModelMesh, colormap_faces_mesh # Keep these imports if needed elsewhere or for type hints
     except ImportError as e:
         print(f"\033[31mError importing samesh functions (even though path seemed present): {e}\033[0m")
-        # ... (rest of error handling)
+        # Fallback definitions might still be needed if other nodes use these
+        read_mesh = None
+        SamModelMesh = None
+        remove_texture = None
+        colormap_faces_mesh = None
 else:
     print("\033[31mError: samesh source directory not found in sys.path after check. Check __init__.py path addition and submodule status.\033[0m")
 
 # Fallback definitions if import fails
-if segment_mesh_samesh_func is None:
-    def segment_mesh_samesh_func(*args, **kwargs):
-        raise ImportError("samesh.models.sam_mesh.segment_mesh could not be imported.")
+# if segment_mesh_samesh_func is None: # No longer calling this directly
+#     def segment_mesh_samesh_func(*args, **kwargs):
+#         raise ImportError("samesh.models.sam_mesh.segment_mesh could not be imported.")
 if read_mesh is None:
     def read_mesh(*args, **kwargs):
         raise ImportError("samesh.data.loaders.read_mesh could not be imported.")
@@ -265,7 +276,9 @@ class SamMeshLoader:
                  print(f"Warning: read_mesh did not return a Trimesh object (got {type(loaded_mesh)}). Returning as is.")
 
             print(f"SamMeshLoader: Mesh loaded successfully. Vertices: {len(loaded_mesh.vertices)}, Faces: {len(loaded_mesh.faces)}")
-            return (loaded_mesh, mesh_full_path,)
+            # Make sure the mesh path is absolute for the worker script
+            absolute_mesh_path = os.path.abspath(mesh_full_path)
+            return (loaded_mesh, absolute_mesh_path,)
 
         except Exception as e:
             print(f"\033[31mError loading mesh {mesh_full_path}: {e}\033[0m")
@@ -338,146 +351,128 @@ class SamMeshSegmenter:
                      samesh_repartition_iterations: int = 1,
                      ):
 
-        if segment_mesh_samesh_func is None or read_mesh is None or remove_texture is None or colormap_faces_mesh is None:
-             raise ImportError("Required samesh functions are not available. Check imports and submodule.")
+        # --- Input Validation ---
+        if not isinstance(sam_mesh, trimesh.Trimesh):
+            print(f"Warning: Input 'sam_mesh' is not a Trimesh object (got {type(sam_mesh)}). Attempting to proceed, but errors may occur.")
+        # if segment_mesh_samesh_func is None or read_mesh is None or remove_texture is None or colormap_faces_mesh is None:
+        #      raise ImportError("Required samesh functions are not available. Check imports and submodule.") # Less critical now as worker handles it
         if not mesh_path or not os.path.exists(mesh_path):
-             raise FileNotFoundError(f"Original mesh file path is invalid or missing: {mesh_path}")
+             # Ensure mesh_path is absolute before passing to worker
+             mesh_path = os.path.abspath(mesh_path)
+             if not os.path.exists(mesh_path):
+                  raise FileNotFoundError(f"Original mesh file path is invalid or missing: {mesh_path}")
+        else:
+             mesh_path = os.path.abspath(mesh_path)
+
         if not sam_checkpoint_path or not os.path.exists(sam_checkpoint_path):
             raise FileNotFoundError(f"SAM checkpoint file not found: {sam_checkpoint_path}")
         if not sam_model_config_path or not os.path.exists(sam_model_config_path):
             raise FileNotFoundError(f"SAM model config file not found: {sam_model_config_path}")
 
-        print(f"SamMeshSegmenter: Starting segmentation for: {mesh_path}")
-        mesh_file_path = Path(mesh_path)
-        filename_stem = mesh_file_path.stem
+        print(f"SamMeshSegmenter: Starting segmentation for: {mesh_path} via worker script.")
 
         os.makedirs(output_directory, exist_ok=True)
         os.makedirs(cache_directory, exist_ok=True)
 
+        # --- Prepare arguments for the worker script ---
+        cmd = [
+            sys.executable, # Use the same python executable that runs ComfyUI
+            WORKER_SCRIPT_PATH,
+            "--mesh_path", mesh_path,
+            "--sam_checkpoint_path", sam_checkpoint_path,
+            "--sam_model_config_path", sam_model_config_path,
+            "--output_directory", output_directory,
+            "--cache_directory", cache_directory,
+            "--output_filename_prefix", output_filename_prefix,
+            "--output_extension", output_extension,
+            "--target_labels", str(target_labels),
+            # Config overrides
+            "--sam_points_per_side", str(sam_points_per_side),
+            "--sam_pred_iou_thresh", str(sam_pred_iou_thresh),
+            "--sam_stability_score_thresh", str(sam_stability_score_thresh),
+            "--sam_stability_score_offset", str(sam_stability_score_offset),
+            "--samesh_min_area", str(samesh_min_area),
+            "--samesh_connections_bin_resolution", str(samesh_connections_bin_resolution),
+            "--samesh_connections_bin_thresh_perc", str(samesh_connections_bin_thresh_perc),
+            "--samesh_smoothing_thresh_perc_size", str(samesh_smoothing_thresh_perc_size),
+            "--samesh_smoothing_thresh_perc_area", str(samesh_smoothing_thresh_perc_area),
+            "--samesh_smoothing_iterations", str(samesh_smoothing_iterations),
+            "--samesh_repartition_lambda", str(samesh_repartition_lambda),
+            "--samesh_repartition_iterations", str(samesh_repartition_iterations),
+        ]
+        if visualize:
+            cmd.append("--visualize")
+        if keep_texture:
+            cmd.append("--keep_texture")
+
+        # --- Prepare Environment for Subprocess ---
+        # Pass ComfyUI base path to worker environment for dependency resolution if needed
+        env = os.environ.copy()
         try:
-            # --- Create configuration directly ---
-            print(f"SamMeshSegmenter: Creating samesh config object.")
-            config = OmegaConf.create({
-                "cache": cache_directory,
-                "cache_overwrite": False, # Or expose this? Defaulting to False seems safer.
-                "output": output_directory,
-                "sam": {
-                    "sam": {
-                        # These will be overridden below
-                        "checkpoint": "placeholder.pt",
-                        "model_config": "placeholder.yaml",
-                        "auto": True,
-                        "ground": False,
-                        "engine_config": {
-                            "points_per_side": sam_points_per_side,
-                            "crop_n_layers": 0,
-                            "pred_iou_thresh": sam_pred_iou_thresh,
-                            "stability_score_thresh": sam_stability_score_thresh,
-                            "stability_score_offset": sam_stability_score_offset,
-                        }
-                    }
-                },
-                "sam_mesh": {
-                    "use_modes": ['sdf', 'norms'], # Keep default for now
-                    "min_area": samesh_min_area,
-                    "connections_bin_resolution": samesh_connections_bin_resolution,
-                    "connections_bin_threshold_percentage": samesh_connections_bin_thresh_perc,
-                    "smoothing_threshold_percentage_size": samesh_smoothing_thresh_perc_size,
-                    "smoothing_threshold_percentage_area": samesh_smoothing_thresh_perc_area,
-                    "smoothing_iterations": samesh_smoothing_iterations,
-                    "repartition_cost": 1, # Keep default
-                    "repartition_lambda": samesh_repartition_lambda,
-                    "repartition_iterations": samesh_repartition_iterations,
-                },
-                # Added default renderer config as it's required by SamModelMesh init
-                "renderer": {
-                    "target_dim": [1024, 1024], # Default from samesh configs
-                    "camera_generation_method": "icosahedron", # Default from samesh configs
-                    "renderer_args": {
-                        "interpolate_norms": True # Default from samesh configs
-                    },
-                    "sampling_args": {"radius": 2}, # Default from samesh configs
-                    "lighting_args": {} # Default from samesh configs
-                }
-            })
+             comfy_base = folder_paths.base_path
+             env['COMFYUI_BASE_PATH'] = comfy_base
+             # Add ComfyUI base and its parent to PYTHONPATH for the worker, just in case
+             python_path = env.get('PYTHONPATH', '')
+             paths_to_add = [comfy_base, os.path.dirname(comfy_base)]
+             # Also add node's samesh paths explicitly if needed, though worker script does it too
+             # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "src"))
+             # paths_to_add.append(os.path.join(comfyui_samesh_node_dir, "samesh-main", "third_party", "segment-anything-2"))
+             env['PYTHONPATH'] = os.pathsep.join([p for p in paths_to_add if p] + [python_path])
 
-            # --- Override SAM model paths in config ---
-            print(f"SamMeshSegmenter: Setting SAM model paths in config.")
-            config.sam.sam.checkpoint = sam_checkpoint_path
-            # The config expects just the filename relative to its internal search path
-            # but Sam2Model likely resolves it. Passing the full path might also work.
-            # Let's try passing the filename first, assuming the downloader places it correctly.
-            # If this fails, we might need to pass the full path or adjust search paths.
-            # The downloader puts it in `models/sam`, which might be searched automatically?
-            # This might require debugging if it fails. We MUST pass the correct config filename for the downloaded model.
-            # Use the filename associated with the provided checkpoint path.
-            # Find the model name associated with the provided checkpoint
-            selected_model_name = None
-            for name, info in SAM_MODELS.items():
-                 if os.path.basename(sam_checkpoint_path) == info["checkpoint_filename"]:
-                      selected_model_name = name
-                      break
-            if selected_model_name:
-                 config.sam.sam.model_config = SAM_MODELS[selected_model_name]["config_filename"]
-                 print(f"SamMeshSegmenter: Setting model_config in samesh config to: {config.sam.sam.model_config}")
-            else:
-                 # Fallback or error if checkpoint doesn't match known models
-                 print(f"\033[91mWarning: Could not determine SAM model type from checkpoint path: {sam_checkpoint_path}. Using basename as config filename: {os.path.basename(sam_model_config_path)}[0m")
-                 config.sam.sam.model_config = os.path.basename(sam_model_config_path)
+        except AttributeError:
+             print("Warning: Could not get ComfyUI base path via folder_paths.base_path. Path resolution inside worker might fail.")
+             env['COMFYUI_BASE_PATH'] = '' # Send empty string
 
-            # Handle target_labels
-            target_labels_arg = None if target_labels < 0 else target_labels
+        # --- Execute Worker Script ---
+        print(f"SamMeshSegmenter: Executing worker: {' '.join(cmd)}")
+        # print(f"SamMeshSegmenter: Worker PYTHONPATH: {env.get('PYTHONPATH')}")
+        try:
+            process = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+            print(f"SamMeshSegmenter: Worker stdout:\n{process.stdout}")
+            if process.stderr:
+                 print(f"SamMeshSegmenter: Worker stderr:\n{process.stderr}")
 
-            # Call the samesh segmentation function
-            print(f"SamMeshSegmenter: Calling samesh.models.sam_mesh.segment_mesh...")
-            # Note: We are technically not using the input `sam_mesh` object directly here,
-            # because the underlying function re-loads from `filename`. This could be optimized
-            # by modifying samesh or saving/reloading the trimesh object if needed.
-            segmented_colored_mesh = segment_mesh_samesh_func(
-                filename=mesh_file_path,
-                config=config,
-                visualize=visualize,
-                extension=output_extension,
-                target_labels=target_labels_arg,
-                texture=keep_texture
-            )
-            print(f"SamMeshSegmenter: samesh function completed.")
+            # --- Parse result from worker stdout ---
+            # Worker script prints the JSON result as the last line of stdout
+            last_line = process.stdout.strip().splitlines()[-1]
+            result_data = json.loads(last_line)
+            final_output_mesh_path = result_data.get("output_mesh_path")
+            final_output_json_path = result_data.get("face2label_path")
 
-            # Rename/move output files (same logic as before)
-            output_mesh_filename = f"{filename_stem}_{output_filename_prefix}.{output_extension}"
-            output_json_filename = f"{filename_stem}_{output_filename_prefix}_face2label.json"
-            final_output_mesh_path = os.path.join(output_directory, output_mesh_filename)
-            final_output_json_path = os.path.join(output_directory, output_json_filename)
+            if not final_output_mesh_path or "Error:" in final_output_mesh_path:
+                 raise RuntimeError(f"Worker script failed to produce mesh output: {final_output_mesh_path}")
+            if not final_output_json_path or "Error:" in final_output_json_path:
+                 raise RuntimeError(f"Worker script failed to produce JSON output: {final_output_json_path}")
 
-            default_saved_mesh_path = os.path.join(output_directory, filename_stem, f"{filename_stem}_segmented.{output_extension}")
-            default_saved_json_path = os.path.join(output_directory, filename_stem, f"{filename_stem}_face2label.json")
-            output_subdir = os.path.join(output_directory, filename_stem)
+            print(f"SamMeshSegmenter: Worker finished successfully. Output mesh: {final_output_mesh_path}, Output JSON: {final_output_json_path}")
 
-            if os.path.exists(default_saved_mesh_path):
-                os.rename(default_saved_mesh_path, final_output_mesh_path)
-                print(f"SamMeshSegmenter: Renamed mesh to {final_output_mesh_path}")
-            else:
-                 print(f"\033[93mWarning: Expected output mesh not found at {default_saved_mesh_path}\033[0m")
-                 final_output_mesh_path = f"Error: Output not found at {default_saved_mesh_path}"
+            # --- Load the resulting mesh --- #
+            # The node needs to return the trimesh object
+            print(f"SamMeshSegmenter: Loading result mesh from {final_output_mesh_path}...")
+            if read_mesh is None:
+                raise ImportError("samesh.data.loaders.read_mesh function is not available to load the result.")
+            # Use basic trimesh loading; samesh read_mesh might do extra processing we don't want here
+            # segmented_colored_mesh = read_mesh(final_output_mesh_path, norm=False, process=False) 
+            segmented_colored_mesh = trimesh.load(final_output_mesh_path, force='mesh') # Use standard trimesh loading
+            if not isinstance(segmented_colored_mesh, trimesh.Trimesh):
+                 raise TypeError(f"Loaded result mesh is not a Trimesh object (got {type(segmented_colored_mesh)}) from path: {final_output_mesh_path}")
 
-            if os.path.exists(default_saved_json_path):
-                os.rename(default_saved_json_path, final_output_json_path)
-                print(f"SamMeshSegmenter: Renamed json to {final_output_json_path}")
-            else:
-                print(f"\033[93mWarning: Expected output json not found at {default_saved_json_path}\033[0m")
-                final_output_json_path = f"Error: Output not found at {default_saved_json_path}"
-            
-            try:
-                 if os.path.exists(output_subdir) and not os.listdir(output_subdir):
-                      os.rmdir(output_subdir)
-            except OSError as e:
-                 print(f"\033[93mWarning: Could not remove empty samesh output directory {output_subdir}: {e}\033[0m")
+            print(f"SamMeshSegmenter: Result mesh loaded.")
 
-            print(f"SamMeshSegmenter: Segmentation successful.")
             return (segmented_colored_mesh, final_output_mesh_path, final_output_json_path)
 
+        except subprocess.CalledProcessError as e:
+            print(f"\033[31mError: Worker script failed (return code {e.returncode}).\033[0m")
+            print(f"\033[31mCommand: {' '.join(e.cmd)}\033[0m")
+            print(f"\033[31mStderr:\n{e.stderr}\033[0m")
+            print(f"\033[31mStdout:\n{e.stdout}\033[0m")
+            raise RuntimeError(f"Segmentation worker script failed. Check logs for details.") from e
+        except json.JSONDecodeError as e:
+            print(f"\033[31mError: Could not parse JSON result from worker script stdout.\033[0m")
+            print(f"\033[31mStdout:\n{process.stdout}\033[0m") # Print stdout for debugging
+            raise RuntimeError(f"Failed to parse result from segmentation worker.") from e
         except Exception as e:
-            print(f"\033[31mError during segmentation for {mesh_path}: {e}\033[0m")
+            print(f"\033[31mError during segmentation subprocess execution or result loading: {e}\033[0m")
             import traceback
             traceback.print_exc()
             raise

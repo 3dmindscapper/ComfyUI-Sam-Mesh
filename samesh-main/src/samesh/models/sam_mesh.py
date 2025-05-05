@@ -5,6 +5,7 @@ import copy
 import multiprocessing as mp
 from collections import defaultdict, Counter
 from pathlib import Path
+import sys # Added for path fix
 
 import numpy as np
 import torch
@@ -25,6 +26,23 @@ from samesh.utils.cameras import *
 from samesh.utils.mesh import duplicate_verts
 from samesh.models.shape_diameter_function import *
 
+# --- Worker Initializer for Multiprocessing Path Fix ---
+def _worker_initializer(comfyui_root):
+    """Adds the ComfyUI root directory to sys.path in a worker process."""
+    print(f"[SamMesh Worker Init] Attempting to add path: {comfyui_root}")
+    print(f"[SamMesh Worker Init] sys.path BEFORE: {sys.path}")
+    try:
+        if comfyui_root and comfyui_root not in sys.path:
+            sys.path.insert(0, comfyui_root)
+            print(f"[SamMesh Worker Init] Successfully added path.")
+        elif not comfyui_root:
+             print(f"[SamMesh Worker Init] Received empty/None path.")
+        else:
+             print(f"[SamMesh Worker Init] Path already in sys.path.")
+    except Exception as e:
+        print(f"[SamMesh Worker Init] Error adding ComfyUI root to sys.path: {e}")
+    print(f"[SamMesh Worker Init] sys.path AFTER: {sys.path}")
+# ------------------------------------------------------
 
 def colormap_faces_mesh(mesh: Trimesh, face2label: dict[int, int], background=np.array([0, 0, 0])) -> Trimesh:
     """
@@ -47,7 +65,7 @@ def colormap_faces_mesh(mesh: Trimesh, face2label: dict[int, int], background=np
     return mesh
 
 
-def norms_mask(norms: NumpyTensor['h w 3'], cam2world: NumpyTensor['4 4'], threshold=0.0) -> NumpyTensor['h w 3']:
+def norms_mask(norms, cam2world, threshold=0.0):
     """
     Mask pixels that are directly facing camera
     """
@@ -127,11 +145,11 @@ def visualize_items(items: dict, path: Path) -> None:
 Multiprocessing functions SamModelMesh
 """
 def compute_face2label(
-    labels: NumpyTensor['l'],
-    faceid: NumpyTensor['h w'], 
-    mask  : NumpyTensor['h w'],
-    norms : NumpyTensor['h w 3'],
-    pose  : NumpyTensor['4 4'], 
+    labels,
+    faceid,
+    mask,
+    norms,
+    pose,
     label_sequence_count: int, threshold_counts: int=16
 ):
     """
@@ -152,7 +170,13 @@ def compute_face2label(
     return face2label
 
 
-def compute_connections(i: int, j: int, face2label1: dict, face2label2: dict, counter_threshold=32):
+def compute_connections(
+    i: int, 
+    j: int, 
+    face2label1: dict[int, Counter], 
+    face2label2: dict[int, Counter],
+    threshold=32,
+) -> dict[int, Counter]:
     """
     """
     #print(f'Computing partial connection ratios for {i} and {j}')
@@ -168,7 +192,7 @@ def compute_connections(i: int, j: int, face2label1: dict, face2label2: dict, co
             connections[label2][label1] += 1
     # remove connections where # overlapping faces is below threshold
     for label1, counter in connections.items():
-        connections[label1] = {k: v for k, v in counter.items() if v > counter_threshold}
+        connections[label1] = {k: v for k, v in counter.items() if v > threshold}
     return connections
 
 
@@ -198,7 +222,7 @@ class SamModelMesh(nn.Module):
                 self.mesh_graph[face1].add(face2)
                 self.mesh_graph[face2].add(face1)
 
-    def render(self, scene: Scene, visualize_path=None) -> dict[str, NumpyTensor]:
+    def render(self, scene: Scene, visualize_path=None) -> dict:
         """
         """
         if self.config.cache is not None and self.config.cache.exists():
@@ -219,7 +243,7 @@ class SamModelMesh(nn.Module):
                 lighting_args=self.config.renderer.lighting_args,
             )
 
-        def compute_norms_masked(norms: NumpyTensor['h w 3'], pose: NumpyTensor['4 4']):
+        def compute_norms_masked(norms, pose):
             """
             """
             valid = norms_mask(norms, pose)
@@ -232,7 +256,7 @@ class SamModelMesh(nn.Module):
             compute_norms_masked(norms, pose) for norms, pose in zip(renders['norms'], renders['poses'])
         ]
 
-        def call_sam(image: Image, mask: NumpyTensor['h w']):
+        def call_sam(image, mask):
             """
             """
             self.sam.engine.point_grids = \
@@ -298,37 +322,48 @@ class SamModelMesh(nn.Module):
             visualize_items(renders, visualize_path)
         return renders
     
-    def lift(self, renders: dict[str, NumpyTensor]) -> dict:
+    def lift(self, renders: dict) -> dict:
         """
         """
+        # --- Determine ComfyUI root path for worker initializer ---
+        comfyui_root_for_workers = None
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            potential_root = os.path.abspath(os.path.join(current_dir, "..", "..", "..", ".."))
+            if os.path.basename(potential_root) == 'ComfyUI':
+                comfyui_root_for_workers = potential_root
+                print(f"[SamMesh Lift] Determined ComfyUI root: {comfyui_root_for_workers}") # Debug Print
+            else:
+                print(f"[SamMesh Lift] Calculated path {potential_root} doesn't seem to be ComfyUI root.") # Debug Print
+        except Exception as e:
+            print(f"[SamMesh Lift] Warning: Could not determine ComfyUI root for worker paths: {e}")
+        # ---------------------------------------------------------
+            
         be, en = 0, len(renders['faces'])
         renders = {k: [v[i] for i in range(be, en) if len(v)] for k, v in renders.items()}
 
         print('Computing face2label for each view on ', mp.cpu_count(), ' cores')
-        label_sequence_count = 1 # background is 0
+        label_sequence_count = 1
         args = []
-        for faceid, cmask, norms, pose in zip(
-            renders['faces'],
-            renders['cmasks'],
-            renders['norms'],
-            renders['poses'],
-        ):
-            labels = np.unique(cmask)
-            labels = labels[labels != 0] # remove background
-            args.append((labels, faceid, cmask, norms, pose, label_sequence_count, self.config.sam_mesh.get('face2label_threshold', 16)))
-            label_sequence_count += len(labels)
-        
-        with mp.Pool(mp.cpu_count()) as pool:
+        for faceid, cmask, norms, pose in zip(renders['faces'], renders['cmasks'], renders['norms'], renders['poses']):
+             labels = np.unique(cmask)
+             labels = labels[labels != 0]
+             args.append((labels, faceid, cmask, norms, pose, label_sequence_count, self.config.sam_mesh.get('face2label_threshold', 16)))
+             label_sequence_count += len(labels)
+
+        # Use the initializer with the original function
+        with mp.Pool(mp.cpu_count(), initializer=_worker_initializer, initargs=(comfyui_root_for_workers,)) as pool:
             face2label_views = pool.starmap(compute_face2label, args)
         
         print('Building match graph on ', mp.cpu_count(), ' cores')
         args = []
         for i, face2label1 in enumerate(face2label_views):
-            for j, face2label2 in enumerate(face2label_views):
-                if i < j:
-                    args.append((i, j, face2label1, face2label2, self.config.sam_mesh.get('connections_threshold', 32)))
-        
-        with mp.Pool(mp.cpu_count()) as pool:
+             for j, face2label2 in enumerate(face2label_views):
+                 if i < j:
+                     args.append((i, j, face2label1, face2label2, self.config.sam_mesh.get('connections_threshold', 32)))
+
+        # Use the initializer with the original function
+        with mp.Pool(mp.cpu_count(), initializer=_worker_initializer, initargs=(comfyui_root_for_workers,)) as pool:
             partial_connections = pool.starmap(compute_connections, args)
 
         connections_ratios = defaultdict(Counter)
@@ -502,19 +537,42 @@ class SamModelMesh(nn.Module):
     def smooth_repartition_faces(self, face2label_consistent: dict, target_labels=None) -> dict:
         """
         """
+        # --- Determine ComfyUI root path for worker initializer ---
+        comfyui_root_for_workers = None
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            potential_root = os.path.abspath(os.path.join(current_dir, "..", "..", "..", ".."))
+            if os.path.basename(potential_root) == 'ComfyUI':
+                comfyui_root_for_workers = potential_root
+                print(f"[SamMesh Repartition] Determined ComfyUI root: {comfyui_root_for_workers}") # Debug Print
+            else:
+                 print(f"[SamMesh Repartition] Calculated path {potential_root} doesn't seem to be ComfyUI root.") # Debug Print
+        except Exception as e:
+            print(f"[SamMesh Repartition] Warning: Could not determine ComfyUI root for worker paths: {e}")
+        # ---------------------------------------------------------
+        
         tmesh = self.renderer.tmesh
-
-        partition = np.array([face2label_consistent[face] for face in range(len(tmesh.faces))])
-
-        cost_data = np.zeros((len(tmesh.faces), np.max(partition) + 1))
+        partition = np.array([face2label_consistent.get(face, 0) for face in range(len(tmesh.faces))]) # Use get for missing faces
+        max_part_label = np.max(partition) if len(partition) > 0 else 0
+        cost_data = np.zeros((len(tmesh.faces), max_part_label + 1))
+        unique_labels = np.unique(partition)
         for f in range(len(tmesh.faces)):
-            for l in np.unique(partition):
+            for l in unique_labels:
                 cost_data[f, l] = 0 if partition[f] == l else 1
-        cost_smoothness = -np.log(tmesh.face_adjacency_angles / np.pi + 1e-20)
+        cost_smoothness = -np.log(np.maximum(tmesh.face_adjacency_angles, 1e-20) / np.pi + 1e-20) # Add maximum for safety
         
         lambda_seed = self.config.sam_mesh.repartition_lambda
+        
+        try:
+            from .sdf_repartition import repartition
+        except ImportError:
+            print("[SamMesh Error] Could not import 'repartition' function.")
+            raise # Re-raise error as it's essential
+
         if target_labels is None:
-            refined_partition = repartition(tmesh, partition, cost_data, cost_smoothness, self.config.sam_mesh.repartition_iterations, lambda_seed)
+            # Use the initializer with the original function
+            with mp.Pool(1, initializer=_worker_initializer, initargs=(comfyui_root_for_workers,)) as pool: # Pool of 1 just to use initializer easily
+                 refined_partition = pool.apply(repartition, (tmesh, partition, cost_data, cost_smoothness, self.config.sam_mesh.repartition_iterations, lambda_seed))
             return {
                 face: refined_partition[face] for face in range(len(tmesh.faces))
             }
@@ -523,12 +581,13 @@ class SamModelMesh(nn.Module):
             self.config.sam_mesh.repartition_lambda_lb, 
             self.config.sam_mesh.repartition_lambda_ub
         )
-        lambdas = np.linspace(*lambda_range, num=mp.cpu_count())
+        lambdas = np.linspace(*lambda_range, num=max(mp.cpu_count() // 2, 1)) # Ensure at least 1 worker
         chunks = [
             (tmesh, partition, cost_data, cost_smoothness, self.config.sam_mesh.repartition_iterations, _lambda) 
             for _lambda in lambdas
         ]
-        with mp.Pool(mp.cpu_count() // 2) as pool:
+        # Use the initializer with the original function
+        with mp.Pool(max(mp.cpu_count() // 2, 1), initializer=_worker_initializer, initargs=(comfyui_root_for_workers,)) as pool:
             refined_partitions = pool.starmap(repartition, chunks)
 
         def compute_cur_labels(part, noise_threshold=10):
@@ -564,7 +623,7 @@ class SamModelMesh(nn.Module):
             face: refined_partition[face] for face in range(len(tmesh.faces))
         }
 
-    def forward(self, scene: Scene, visualize_path=None, target_labels=None) -> tuple[dict, Trimesh]:
+    def forward(self, scene: Scene, visualize_path=None, target_labels=None) -> tuple:
         """
         """
         self.load(scene)
@@ -606,7 +665,14 @@ class SamModelMesh(nn.Module):
         return components
 
 
-def segment_mesh(filename: Path | str, config: OmegaConf, visualize=False, extension='glb', target_labels=None, texture=False) -> Trimesh:
+def segment_mesh(
+    filename: str | Path,
+    config: OmegaConf,
+    visualize=False,
+    extension='glb',
+    target_labels=None,
+    texture=False
+) -> Trimesh:
     """
     """
     print('Segmenting mesh with SAMesh: ', filename)
