@@ -15,18 +15,23 @@ def add_to_path(p):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-# Add samesh and sam2 to path *before* importing them
+# Add samesh base, src and sam2 to path *before* importing them
+add_to_path(samesh_base_dir) # Add the base directory
 add_to_path(samesh_src_dir)
 add_to_path(sam2_dir)
 
 # Add ComfyUI base path if provided (for folder_paths resolution within samesh)
-# This is crucial for samesh.models.sam.Sam2Model finding checkpoints/configs
+# This might be needed for implicit dependencies or path lookups within samesh
 comfyui_base_path = os.environ.get("COMFYUI_BASE_PATH")
 if comfyui_base_path:
+    print(f"[SamMesh Worker Init] Adding COMFYUI_BASE_PATH: {comfyui_base_path}")
     add_to_path(comfyui_base_path)
     # Also try adding the parent of base_path, as sometimes imports expect that structure
     comfyui_parent_path = os.path.dirname(comfyui_base_path)
+    print(f"[SamMesh Worker Init] Adding parent of COMFYUI_BASE_PATH: {comfyui_parent_path}")
     add_to_path(comfyui_parent_path)
+else:
+     print("[SamMesh Worker Init] COMFYUI_BASE_PATH not found in environment.")
 
 
 # Now import samesh components
@@ -211,8 +216,10 @@ def main():
             "output_mesh_path": final_output_mesh_path,
             "face2label_path": final_output_json_path
         }
+        # Print status message *before* the JSON
+        print("Worker: Segmentation script finished successfully.") 
+        # Print JSON result as the very last line
         print(json.dumps(result))
-        print("Worker: Segmentation script finished successfully.")
 
     except ImportError:
          # Already handled above, but catch again just in case

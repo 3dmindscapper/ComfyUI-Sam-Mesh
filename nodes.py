@@ -427,7 +427,10 @@ class SamMeshSegmenter:
         print(f"SamMeshSegmenter: Executing worker: {' '.join(cmd)}")
         # print(f"SamMeshSegmenter: Worker PYTHONPATH: {env.get('PYTHONPATH')}")
         try:
-            process = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+            # Set the working directory to the samesh src directory
+            samesh_worker_cwd = os.path.join(comfyui_samesh_node_dir, "samesh-main", "src")
+            print(f"SamMeshSegmenter: Setting worker CWD to: {samesh_worker_cwd}")
+            process = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env, cwd=samesh_worker_cwd)
             print(f"SamMeshSegmenter: Worker stdout:\n{process.stdout}")
             if process.stderr:
                  print(f"SamMeshSegmenter: Worker stderr:\n{process.stderr}")

@@ -562,12 +562,16 @@ class SamModelMesh(nn.Module):
         cost_smoothness = -np.log(np.maximum(tmesh.face_adjacency_angles, 1e-20) / np.pi + 1e-20) # Add maximum for safety
         
         lambda_seed = self.config.sam_mesh.repartition_lambda
-        
+
         try:
-            from .sdf_repartition import repartition
+            from .shape_diameter_function import repartition # Corrected import
         except ImportError:
-            print("[SamMesh Error] Could not import 'repartition' function.")
-            raise # Re-raise error as it's essential
+             print("[SamMesh Error] Could not import 'repartition' function.")
+             print("[SamMesh Info] Repartitioning requires additional dependencies or there's an internal path issue. Skipping.")
+             return face2label_consistent # Return the un-repartitioned labels
+        except Exception as e:
+             print(f"[SamMesh Error] Unexpected error during repartition import: {e}")
+             return face2label_consistent
 
         if target_labels is None:
             # Use the initializer with the original function
