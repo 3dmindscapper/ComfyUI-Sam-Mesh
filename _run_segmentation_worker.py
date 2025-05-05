@@ -174,6 +174,11 @@ def main():
         rename_success = True
         if os.path.exists(default_saved_mesh_path):
             try:
+                # --- Add check and removal of destination file ---
+                if os.path.exists(final_output_mesh_path):
+                    print(f"Worker: Destination mesh {final_output_mesh_path} exists. Removing before rename.")
+                    os.remove(final_output_mesh_path)
+                # -------------------------------------------------
                 os.rename(default_saved_mesh_path, final_output_mesh_path)
                 print(f"Worker: Renamed mesh to {final_output_mesh_path}")
             except Exception as e:
@@ -187,6 +192,11 @@ def main():
 
         if os.path.exists(default_saved_json_path):
             try:
+                 # --- Add check and removal of destination file ---
+                 if os.path.exists(final_output_json_path):
+                     print(f"Worker: Destination json {final_output_json_path} exists. Removing before rename.")
+                     os.remove(final_output_json_path)
+                 # -------------------------------------------------
                  os.rename(default_saved_json_path, final_output_json_path)
                  print(f"Worker: Renamed json to {final_output_json_path}")
             except Exception as e:
