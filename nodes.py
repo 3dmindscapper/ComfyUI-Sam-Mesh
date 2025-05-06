@@ -655,7 +655,7 @@ class SamMeshRenderer:
         else:
             center = mesh.centroid
             scale = np.max(bounds[1] - bounds[0])
-            distance = scale * 2.0 # Adjust multiplier as needed
+            distance = scale * 1.5 # Closer distance
 
         aspect_ratio = 1.0 # Square renders
         yfov = np.pi / 4.0 # Field of view ~45 degrees
