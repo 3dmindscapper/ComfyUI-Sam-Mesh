@@ -237,8 +237,8 @@ class SamMeshLoader:
                 "mesh": (sorted(files) if files else ["No mesh files found"], {"tooltip_prompt": "Select a mesh file from the ComfyUI input directory."}),
             },
             "optional": {
-                "normalize_mesh": ("BOOLEAN", {"default": False, "tooltip_prompt": "Normalize the mesh vertices to fit within a unit cube centered at the origin."}),
-                "process_mesh": ("BOOLEAN", {"default": True, "tooltip_prompt": "Enable Trimesh's default processing (e.g., removing duplicate vertices, fixing winding)."}),
+                "normalize_mesh": ("BOOLEAN", {"default": False, "tooltip_prompt": "Scales and translates the mesh to fit within a unit cube centered at the origin. Useful for standardizing mesh size for consistent SAM processing, but can alter original scale."}),
+                "process_mesh": ("BOOLEAN", {"default": True, "tooltip_prompt": "Enables Trimesh's default processing (e.g., removing duplicate vertices, merging close vertices, fixing face winding). Can help clean up messy geometry but may alter vertex/UV data or topology. Disable if precise original structure is critical, especially with textures."}),
             }
         }
 
@@ -324,10 +324,10 @@ class SamMeshSegmenter:
                 # --- User configurable parameters ---
                 "output_directory": ("STRING", {"default": DEFAULT_OUTPUT_DIR, "tooltip_prompt": "Directory to save the face-to-label JSON file and intermediate files."}),
                 "cache_directory": ("STRING", {"default": DEFAULT_CACHE_DIR, "tooltip_prompt": "Directory for samesh to cache rendering or computation results."}),
-                "keep_texture": ("BOOLEAN", {"default": False, "tooltip_prompt": "Attempt to preserve original mesh texture during segmentation."}),
+                "keep_texture": ("BOOLEAN", {"default": False, "tooltip_prompt": "If checked, the segmentation process will attempt to preserve the original mesh's texture and apply it to the segmented parts. UV mapping quality depends on the samesh library's capabilities."}),
             },
             "optional": {
-                 "target_labels": ("INT", {"default": -1, "min": -1, "max": 10000, "tooltip_prompt": "Target number of segments (-1 for auto/default behavior."}),
+                 "target_labels": ("INT", {"default": -1, "min": -1, "max": 10000, "tooltip_prompt": "Desired number of distinct segments. Set to -1 for the samesh library's default/automatic behavior. Higher numbers may result in finer-grained segmentation."}),
                  "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip_prompt": "Random seed for reproducible segmentation results."}),
             }
         }
@@ -652,12 +652,12 @@ class SamMeshRenderer:
         return {
             "required": {
                 "mesh": ("SAM_MESH",),
-                "render_resolution": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 64, "tooltip_prompt": "Resolution (width & height) for each of the 4 rendered views."}),
+                "render_resolution": ("INT", {"default": 1024, "min": 64, "max": 2048, "step": 64, "tooltip_prompt": "Resolution (width & height) for each of the 4 rendered views."}),
                 "background_color": ("STRING", {"default": "[0.1, 0.1, 0.1, 1.0]", "tooltip_prompt": "Background RGBA color as a string list, e.g., '[R, G, B, A]'. Values 0-1 or 0-255."}),
             },
             "optional": {
                 "face2label_path": ("STRING", {"default": "", "forceInput": True, "tooltip_prompt": "Optional path to face2label.json. If provided and 'force_segment_colors' is true, segments will be colored."}),
-                "force_segment_colors": ("BOOLEAN", {"default": True, "tooltip_prompt": "If true and face2label_path is valid, override mesh's existing appearance with segment colors."}),
+                "force_segment_colors": ("BOOLEAN", {"default": True, "tooltip_prompt": "If checked and 'face2label_path' is provided and valid, this node will render the mesh with distinct colors for each segment label, overriding any original texture or vertex colors. Useful for visualizing segments."}),
             }
         }
 
