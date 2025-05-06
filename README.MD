@@ -126,7 +126,29 @@ You may need to install system libraries for headless OpenGL rendering (like EGL
 Texture Issues with keep_texture: The success of texture preservation depends on the samesh library's capabilities and the input mesh's UV layout. Complex UVs or meshes heavily altered by segmentation might not retain textures perfectly.
 
 ## License
-(Choose a license for your project, e.g., MIT License, Apache 2.0. Add the license text or a link to it here.)
-Acknowledgements
+
+# MIT License
+
+# Copyright (c) 2025 VAST-AI-Research and contributors.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE
+
+##Acknowledgements
 This project is a wrapper around the powerful Segment Any Mesh (SAMesh) library. All credit for the core segmentation algorithm and its implementation goes to the original SAMesh authors: George Tang, William Zhao, Logan Ford, David Benhaim, and Paul Zhang.
 Please refer to the SAMesh GitHub repository and their research paper for more details on the underlying technology.
