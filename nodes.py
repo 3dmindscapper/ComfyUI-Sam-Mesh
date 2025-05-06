@@ -346,6 +346,11 @@ class SamMeshSegmenter:
         output_extension = "glb"
         visualize = False
 
+        # Cap the seed to be within the valid range for numpy.random.seed (0 to 2**32 - 1)
+        # 2**32 - 1 = 4294967295
+        # Using modulo is a common way to bring a large seed into the valid range.
+        capped_seed = seed % (2**32)
+
         cmd = [
             sys.executable,
             WORKER_SCRIPT_PATH,
@@ -361,7 +366,7 @@ class SamMeshSegmenter:
         if keep_texture:
             cmd.append("--keep_texture")
         
-        cmd.extend(["--seed", str(seed)])
+        cmd.extend(["--seed", str(capped_seed)])
 
         # --- Prepare Environment for Subprocess ---
         env = os.environ.copy()
