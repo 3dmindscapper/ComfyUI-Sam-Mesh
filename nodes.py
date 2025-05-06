@@ -409,12 +409,12 @@ class SamMeshSegmenter:
             if not isinstance(segmented_colored_mesh, trimesh.Trimesh):
                  raise TypeError(f"Loaded result mesh is not a Trimesh object (got {type(segmented_colored_mesh)}) from path: {final_output_mesh_path}")
 
-            print(f"SamMeshSegmenter: Result mesh loaded. Deleting intermediate file: {final_output_mesh_path}")
-            try:
-                os.remove(final_output_mesh_path)
-                print(f"SamMeshSegmenter: Intermediate file deleted.")
-            except OSError as e:
-                 print(f" [93mWarning: Could not delete intermediate segmented mesh file {final_output_mesh_path}: {e} [0m")
+            # print(f"SamMeshSegmenter: Result mesh loaded. Deleting intermediate file: {final_output_mesh_path}")
+            # try:
+            #     os.remove(final_output_mesh_path)
+            #     print(f"SamMeshSegmenter: Intermediate file deleted.")
+            # except OSError as e:
+            #      print(f" [93mWarning: Could not delete intermediate segmented mesh file {final_output_mesh_path}: {e} [0m")
 
             return (segmented_colored_mesh, final_output_json_path,)
 
@@ -483,6 +483,21 @@ class SamMeshExporter:
         base_mesh = segmented_mesh
         mesh_parts = []
 
+        # --- Check if the base mesh has texture information ---
+        has_texture_info = False
+        if (hasattr(base_mesh, 'visual') and 
+            isinstance(base_mesh.visual, trimesh.visual.TextureVisuals) and 
+            hasattr(base_mesh.visual, 'uv') and 
+            base_mesh.visual.uv is not None and 
+            hasattr(base_mesh.visual, 'material') and 
+            base_mesh.visual.material is not None and
+            len(base_mesh.visual.uv) == len(base_mesh.vertices)): # Ensure UVs match vertices
+            has_texture_info = True
+            print("SamMeshExporter: Base mesh has texture info (UVs and Material). Attempting to texture segments.")
+        else:
+            print("SamMeshExporter: Warning - Base mesh lacks complete texture info (UVs or Material). Segments will not be textured.")
+        # ------------------------------------------------------
+
         for label in unique_labels:
             faces_for_label_mask = [idx for idx, lbl in face_labels.items() if lbl == label]
 
@@ -503,11 +518,30 @@ class SamMeshExporter:
 
                 segment_mesh = trimesh.Trimesh(vertices=segment_vertices, faces=new_segment_faces)
 
-                if hasattr(base_mesh, 'visual') and hasattr(base_mesh.visual, 'vertex_colors') and len(base_mesh.visual.vertex_colors) == len(base_mesh.vertices):
-                     segment_mesh.visual = trimesh.visual.ColorVisuals(
-                         mesh=segment_mesh,
-                         vertex_colors=base_mesh.visual.vertex_colors[unique_vertex_indices]
-                     )
+                # --- Assign Texture/Material if available --- 
+                if has_texture_info:
+                    try:
+                        # Extract the relevant UV coordinates for the segment's vertices
+                        segment_uvs = base_mesh.visual.uv[unique_vertex_indices]
+                        
+                        # Assign TextureVisuals with the extracted UVs and original material
+                        segment_mesh.visual = trimesh.visual.TextureVisuals(
+                            uv=segment_uvs, 
+                            material=base_mesh.visual.material
+                        )
+                    except Exception as tex_e:
+                        print(f" [93mSamMeshExporter: Warning - Failed to apply texture to label {label}: {tex_e} [0m")
+                        # Fallback: remove potentially incomplete visual info
+                        segment_mesh.visual = trimesh.visual.ColorVisuals()
+                else:
+                     # Fallback for non-textured input or if base mesh lacked texture info
+                     # Check if base_mesh has vertex colors instead (e.g., from a previous colored export)
+                     if hasattr(base_mesh, 'visual') and hasattr(base_mesh.visual, 'vertex_colors') and len(base_mesh.visual.vertex_colors) == len(base_mesh.vertices):
+                         segment_mesh.visual = trimesh.visual.ColorVisuals(
+                             mesh=segment_mesh,
+                             vertex_colors=base_mesh.visual.vertex_colors[unique_vertex_indices]
+                         )
+                # --------------------------------------------
 
                 mesh_parts.append(segment_mesh)
 

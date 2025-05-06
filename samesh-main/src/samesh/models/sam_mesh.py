@@ -687,6 +687,43 @@ def segment_mesh(
 
     model = SamModelMesh(config)
     tmesh = read_mesh(filename, norm=True)
+
+    # --- ADD DEBUG PRINTS HERE ---
+    print("--- DEBUG: After initial read_mesh --- marginalised")
+    if tmesh is None:
+        print("DEBUG: tmesh is None after initial read_mesh")
+    else:
+        print(f"DEBUG: type(tmesh): {type(tmesh)}")
+        if hasattr(tmesh, 'visual'):
+            print(f"DEBUG: type(tmesh.visual): {type(tmesh.visual)}")
+            if hasattr(tmesh.visual, 'defined'):
+                print(f"DEBUG: tmesh.visual.defined: {tmesh.visual.defined}")
+            else:
+                print("DEBUG: tmesh.visual has NO 'defined' attribute.")
+
+            if hasattr(tmesh.visual, 'material'):
+                print(f"DEBUG: type(tmesh.visual.material): {type(tmesh.visual.material)}")
+                if tmesh.visual.material is None:
+                    print("DEBUG: tmesh.visual.material is None")
+                else:
+                    if hasattr(tmesh.visual.material, 'image_texture'):
+                        print(f"DEBUG: TextureVisuals image_texture: {tmesh.visual.material.image_texture}")
+                    if hasattr(tmesh.visual.material, 'baseColorTexture'):
+                        print(f"DEBUG: PBR baseColorTexture: {tmesh.visual.material.baseColorTexture}")
+                    else:
+                        print("DEBUG: PBR material has NO baseColorTexture attribute.")
+            else:
+                print("DEBUG: tmesh.visual has NO material attribute.")
+            
+            if hasattr(tmesh.visual, 'uv'):
+                print(f"DEBUG: tmesh.visual.uv is present, length: {len(tmesh.visual.uv) if tmesh.visual.uv is not None else 'None'}")
+            else:
+                print("DEBUG: tmesh.visual has NO uv attribute.")
+        else:
+            print("DEBUG: tmesh has NO visual attribute.")
+    print("--- END DEBUG ---")
+    # --- END DEBUG PRINTS ---
+
     if not texture:
         tmesh = remove_texture(tmesh, visual_kind='vertex')
     
@@ -696,10 +733,49 @@ def segment_mesh(
 
     # colormap and save mesh
     os.makedirs(config.output, exist_ok=True)
-    tmesh_colored = colormap_faces_mesh(tmesh, faces2label)
-    tmesh_colored.export       (f'{config.output}/{filename.stem}_segmented.{extension}')
-    json.dump(faces2label, open(f'{config.output}/{filename.stem}_face2label.json', 'w'))
-    return tmesh_colored
+
+    # --- Modified Export Logic ---
+    export_path_mesh = config.output / f'{filename.stem}_segmented.{extension}'
+    export_path_json = config.output / f'{filename.stem}_face2label.json'
+    
+    final_mesh_to_return = None
+
+    if texture:
+        # If keeping texture, export the *original* mesh geometry and visuals.
+        # Reload the original mesh cleanly to ensure textures and original state.
+        print("Exporting original mesh with texture.")
+        original_mesh = read_mesh(filename, norm=False, process=False) # Load with minimal processing
+        if original_mesh is None:
+             print("Warning: Could not reload original mesh for textured export. Falling back to colored mesh.")
+             # Fallback to exporting the colored mesh if original fails to load
+             tmesh_colored = colormap_faces_mesh(tmesh, faces2label)
+             tmesh_colored.export(export_path_mesh)
+             final_mesh_to_return = tmesh_colored
+        else:
+            original_mesh.export(export_path_mesh)
+            final_mesh_to_return = original_mesh
+    else:
+        # If not keeping texture, export the mesh colored by segment ID.
+        print("Exporting mesh colored by segments.")
+        tmesh_colored = colormap_faces_mesh(tmesh, faces2label)
+        tmesh_colored.export(export_path_mesh)
+        final_mesh_to_return = tmesh_colored
+
+    # Save face to label mapping (always save this)
+    print(f"Saving face-to-label mapping to: {export_path_json}")
+    with open(export_path_json, 'w') as f:
+        # Ensure keys and values are basic types for JSON
+        faces2label_serializable = {int(k): int(v) for k, v in faces2label.items()}
+        json.dump(faces2label_serializable, f)
+
+    print(f'Saved SAMesh output to {config.output.parent}/{config.output.name}')
+    
+    if final_mesh_to_return is None:
+         # Should ideally not happen, but have a final fallback
+         print("Error during export selection. Returning initially loaded tmesh.")
+         return tmesh 
+         
+    return final_mesh_to_return # Return the mesh object that was actually exported
 
 
 if __name__ == '__main__':
