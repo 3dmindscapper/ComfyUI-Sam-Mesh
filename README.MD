@@ -1,4 +1,4 @@
-ComfyUI-Sam-Mesh
+#ComfyUI-Sam-Mesh
 
 This project integrates the Segment Any Mesh (SAMesh) library into ComfyUI, providing a set of custom nodes for performing zero-shot 3D mesh part segmentation using SAM2 (Segment Anything Model 2). It allows users to load meshes, segment them into parts, and visualize or export the results directly within a ComfyUI workflow.
 Features
@@ -11,7 +11,7 @@ Export segmented meshes as a single GLB file, with each segment as a separate ob
 Render multi-view previews (front, right, top, back) of meshes.
 Option to visualize segments with distinct colors in the rendered views.
 
-Installation
+##Installation
 Clone this Repository:
 Navigate to your ComfyUI/custom_nodes/ directory and clone this repository:
 Apply to README.md
@@ -45,7 +45,7 @@ Note from samesh README: If you encounter pyrender issues related to ctypes, try
 
 4. Restart ComfyUI: After installation, restart ComfyUI to ensure the custom nodes are loaded.
 
-Nodes Overview
+##Nodes Overview
 Here's a brief overview of the nodes provided:
 1. SAM Model Downloader (SamMesh)
 Purpose: Downloads SAM2 Hiera model checkpoints and their corresponding configuration YAML files. These are required by the segmentation node.
@@ -99,7 +99,7 @@ face2label_path: (String, optional) Path to a face2label.json file.
 force_segment_colors: (Boolean, default: True)
 Tooltip: If checked and face2label_path is provided and valid, this node will render the mesh with distinct colors for each segment label, overriding any original texture or vertex colors. Useful for visualizing segments.
 
-Outputs:
+##Outputs:
 rendered_views: An IMAGE output suitable for previewing or further processing in ComfyUI.
 Example Workflow
 (You can add a screenshot of your nodes connected in a typical workflow here.)
@@ -109,14 +109,14 @@ Load Mesh -> Segment Mesh with SAM (sam_mesh and mesh_path)
 Segment Mesh with SAM -> Export Segmented Mesh (segmented_mesh and face2label_path)
 Segment Mesh with SAM (segmented_mesh) AND Segment Mesh with SAM (face2label_path) -> Render Mesh Views (to visualize segments if force_segment_colors is on).
 
-Troubleshooting
+##Troubleshooting
 Submodule Not Found / samesh Import Errors: Ensure you have correctly initialized the Git submodule by running git submodule update --init --recursive from the ComfyUI-Sam-Mesh directory.
 Render Mesh Views Node Fails or Shows Black Images:
 This node requires pyrender. Ensure it's installed correctly via requirements.txt.
 You may need to install system libraries for headless OpenGL rendering (like EGL or OSMesa on Linux). See the pyrender documentation.
 Texture Issues with keep_texture: The success of texture preservation depends on the samesh library's capabilities and the input mesh's UV layout. Complex UVs or meshes heavily altered by segmentation might not retain textures perfectly.
 
-License
+##License
 (Choose a license for your project, e.g., MIT License, Apache 2.0. Add the license text or a link to it here.)
 Acknowledgements
 This project is a wrapper around the powerful Segment Any Mesh (SAMesh) library. All credit for the core segmentation algorithm and its implementation goes to the original SAMesh authors: George Tang, William Zhao, Logan Ford, David Benhaim, and Paul Zhang.
