@@ -270,6 +270,29 @@ class SamMeshLoader:
             if loaded_mesh is None:
                 raise ValueError(f"samesh.data.loaders.read_mesh returned None for {mesh_full_path}. Is the file valid?")
             
+            # --- Debug Prints for Material --- 
+            print(f"SamMeshLoader Debug: Loaded mesh type: {type(loaded_mesh)}")
+            if hasattr(loaded_mesh, 'visual'):
+                print(f"SamMeshLoader Debug: Visual type: {type(loaded_mesh.visual)}")
+                if hasattr(loaded_mesh.visual, 'material') and loaded_mesh.visual.material is not None:
+                    print(f"SamMeshLoader Debug: Material type: {type(loaded_mesh.visual.material)}")
+                    if isinstance(loaded_mesh.visual.material, trimesh.visual.material.PBRMaterial):
+                        print(f"SamMeshLoader Debug: PBR baseColorTexture: {getattr(loaded_mesh.visual.material, 'baseColorTexture', 'Not found')}")
+                        print(f"SamMeshLoader Debug: PBR metallicRoughnessTexture: {getattr(loaded_mesh.visual.material, 'metallicRoughnessTexture', 'Not found')}")
+                    elif hasattr(loaded_mesh.visual.material, 'image_texture'): # For SimpleMaterial or older TextureVisuals
+                        print(f"SamMeshLoader Debug: Material image_texture: {getattr(loaded_mesh.visual.material, 'image_texture', 'Not found')}")
+                    else:
+                        print("SamMeshLoader Debug: Material is of an unrecognized type for texture checking or has no direct image_texture.")
+                else:
+                    print("SamMeshLoader Debug: Mesh visual has no material or material is None.")
+                if hasattr(loaded_mesh.visual, 'uv') and loaded_mesh.visual.uv is not None:
+                    print(f"SamMeshLoader Debug: UVs are present. Count: {len(loaded_mesh.visual.uv)}")
+                else:
+                    print("SamMeshLoader Debug: Mesh visual has no UVs or UVs are None.")
+            else:
+                print("SamMeshLoader Debug: Loaded mesh has no visual attribute.")
+            # --- End Debug Prints ---
+
             if not isinstance(loaded_mesh, trimesh.Trimesh):
                  print(f"Warning: read_mesh did not return a Trimesh object (got {type(loaded_mesh)}). Returning as is.")
 
@@ -516,21 +539,68 @@ class SamMeshExporter:
                     for face in segment_faces
                 ], dtype=np.int64)
 
-                segment_mesh = trimesh.Trimesh(vertices=segment_vertices, faces=new_segment_faces)
+                segment_mesh = trimesh.Trimesh(vertices=segment_vertices, faces=new_segment_faces, process=False)
+                # --- BEGIN ADDED DEBUG ---
+                print(f"SamMeshExporter Debug (Label {label}): segment_mesh created. Vertices: {segment_mesh.vertices.shape}, Faces: {segment_mesh.faces.shape}")
+                # --- END ADDED DEBUG ---
 
-                # --- Assign Texture/Material if available --- 
+                # --- Assign Texture/Material if available ---
                 if has_texture_info:
                     try:
                         # Extract the relevant UV coordinates for the segment's vertices
                         segment_uvs = base_mesh.visual.uv[unique_vertex_indices]
-                        
-                        # Assign TextureVisuals with the extracted UVs and original material
-                        segment_mesh.visual = trimesh.visual.TextureVisuals(
-                            uv=segment_uvs, 
-                            material=base_mesh.visual.material
-                        )
+
+                        # --- BEGIN ADDED DEBUG (from previous session, kept for context) ---
+                        if isinstance(segment_uvs, np.ndarray) and segment_uvs.ndim == 2 and segment_uvs.shape[1] == 2 and segment_uvs.shape[0] > 0:
+                            print(f"SamMeshExporter Debug (Label {label}): segment_uvs shape: {segment_uvs.shape}, " +
+                                  f"min_uv: {np.min(segment_uvs, axis=0)}, max_uv: {np.max(segment_uvs, axis=0)}, " +
+                                  f"num_segment_vertices_from_source: {len(segment_vertices)}") # Changed last part for clarity
+                            if segment_uvs.shape[0] != len(segment_vertices): # len(segment_vertices) is source for segment_uvs count
+                                print(f" [91mSamMeshExporter Error (Label {label}): UV source count {segment_uvs.shape[0]} != Original segment vertex count {len(segment_vertices)} [0m")
+                        elif isinstance(segment_uvs, np.ndarray):
+                            print(f" [93mSamMeshExporter Warning (Label {label}): segment_uvs has unexpected data: shape {segment_uvs.shape}, type {segment_uvs.dtype} [0m")
+                        else:
+                            print(f" [93mSamMeshExporter Warning (Label {label}): segment_uvs is not a numpy array or is empty. Type: {type(segment_uvs)} [0m")
+                        # --- END ADDED DEBUG ---
+
+                        # --- BEGIN NEW CRITICAL CHECK ---
+                        if segment_mesh.vertices.shape[0] != segment_uvs.shape[0]:
+                            print(f" [91mSamMeshExporter CRITICAL ERROR (Label {label}): Actual segment_mesh vertex count {segment_mesh.vertices.shape[0]} MISMATCHES segment_uvs count {segment_uvs.shape[0]} BEFORE TextureVisuals assignment! [0m")
+                        else:
+                            print(f"SamMeshExporter Debug (Label {label}): Actual segment_mesh vertex count {segment_mesh.vertices.shape[0]} matches segment_uvs count {segment_uvs.shape[0]} before assignment.")
+                        # --- END NEW CRITICAL CHECK ---
+
+                        original_texture_image = None
+                        # Ensure the base material is PBRMaterial and has a baseColorTexture
+                        if isinstance(base_mesh.visual.material, trimesh.visual.material.PBRMaterial) and \
+                           hasattr(base_mesh.visual.material, 'baseColorTexture') and \
+                           base_mesh.visual.material.baseColorTexture is not None:
+                            original_texture_image = base_mesh.visual.material.baseColorTexture
+                        # Fallback for non-PBR or differently structured materials that might have an image_texture
+                        elif hasattr(base_mesh.visual.material, 'image_texture') and \
+                             base_mesh.visual.material.image_texture is not None:
+                            original_texture_image = base_mesh.visual.material.image_texture
+
+                        if original_texture_image is not None:
+                            # Create a new PBRMaterial for the segment
+                            # You can extend this to copy other PBR properties if needed
+                            new_material = trimesh.visual.material.PBRMaterial(
+                                baseColorTexture=original_texture_image,
+                                metallicFactor=getattr(base_mesh.visual.material, 'metallicFactor', 0.0),
+                                roughnessFactor=getattr(base_mesh.visual.material, 'roughnessFactor', 0.5)
+                                # Add other PBR properties from base_mesh.visual.material here if necessary
+                            )
+                            segment_mesh.visual = trimesh.visual.TextureVisuals(
+                                uv=segment_uvs,
+                                material=new_material 
+                            )
+                            # print(f"Segment {label} textured with new PBRMaterial.") # Optional debug
+                        else:
+                            print(f" [93mSamMeshExporter: Warning - Could not extract texture image from base_mesh material for label {label}. Segment will not be textured. [0m")
+                            segment_mesh.visual = trimesh.visual.ColorVisuals() # Fallback to no texture
+
                     except Exception as tex_e:
-                        print(f" [93mSamMeshExporter: Warning - Failed to apply texture to label {label}: {tex_e} [0m")
+                        print(f" [93mSamMeshExporter: Error applying texture to label {label}: {tex_e} [0m")
                         # Fallback: remove potentially incomplete visual info
                         segment_mesh.visual = trimesh.visual.ColorVisuals()
                 else:
@@ -584,6 +654,10 @@ class SamMeshRenderer:
                 "mesh": ("SAM_MESH",),
                 "render_resolution": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 64, "tooltip_prompt": "Resolution (width & height) for each of the 4 rendered views."}),
                 "background_color": ("STRING", {"default": "[0.1, 0.1, 0.1, 1.0]", "tooltip_prompt": "Background RGBA color as a string list, e.g., '[R, G, B, A]'. Values 0-1 or 0-255."}),
+            },
+            "optional": {
+                "face2label_path": ("STRING", {"default": "", "forceInput": True, "tooltip_prompt": "Optional path to face2label.json. If provided and 'force_segment_colors' is true, segments will be colored."}),
+                "force_segment_colors": ("BOOLEAN", {"default": True, "tooltip_prompt": "If true and face2label_path is valid, override mesh's existing appearance with segment colors."}),
             }
         }
 
@@ -608,41 +682,98 @@ class SamMeshRenderer:
             return list(default)
 
 
-    def render_views(self, mesh: trimesh.Trimesh, render_resolution: int, background_color: str):
+    def render_views(self, mesh: trimesh.Trimesh, render_resolution: int, background_color: str, face2label_path: str = "", force_segment_colors: bool = True):
         if pyrender is None:
             raise ImportError("pyrender is required for SamMeshRenderer but was not found.")
 
         bg_color = self._parse_color(background_color)
+        
+        working_mesh = mesh # Start with the input mesh
+        is_colored_copy = False # Flag to indicate if segment colors were applied
 
-        render_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=True)
-        material = None
+        if force_segment_colors and face2label_path and os.path.exists(face2label_path):
+            print(f"SamMeshRenderer: Attempting to apply segment colors from {face2label_path}")
+            try:
+                mesh_copy = copy.deepcopy(mesh) # Work on a copy
 
-        if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None and len(mesh.visual.vertex_colors) == len(mesh.vertices):
-            colors = mesh.visual.vertex_colors
-            if colors.shape[1] == 3:
-                colors = np.hstack((colors[:, :3], np.full((colors.shape[0], 1), 255, dtype=np.uint8)))
-            if colors.dtype != np.uint8:
-                 if np.issubdtype(colors.dtype, np.floating):
-                     colors = (colors * 255).clip(0, 255)
-                 colors = colors.astype(np.uint8)
+                with open(face2label_path, 'r') as f:
+                    face2label_data = json.load(f)
+                
+                # Ensure face indices in JSON are integers
+                face_labels_map = {int(k): int(v) for k, v in face2label_data.items()}
+                
+                if not mesh_copy.faces.shape[0] == 0 : # Check if mesh has faces
+                    unique_labels = sorted(list(set(val for val in face_labels_map.values() if val is not None))) # Filter out None labels if any
+                    
+                    # Generate a color for each unique label
+                    # Ensure we have enough colors if many labels exist; trimesh.visual.random_color might recycle for large counts.
+                    # Using a simple colormap approach for more distinct colors if many labels.
+                    if not unique_labels: # No labels found in the map
+                        print("SamMeshRenderer: Warning - No valid labels found in face2label_path. Using original mesh.")
+                    else:
+                        label_to_color_idx_map = {label: i for i, label in enumerate(unique_labels)}
+                        num_unique_labels = len(unique_labels)
+                        
+                        # Use trimesh.visual.random_color() to generate distinct colors
+                        # This is more compatible with older trimesh versions than interpolate_rgba
+                        colors_for_labels = [trimesh.visual.random_color() for _ in range(num_unique_labels)]
+                                                
+                        default_face_color = np.array([128, 128, 128, 255], dtype=np.uint8) # Grey for faces not in map or unlabelled
+                        
+                        new_face_colors = np.tile(default_face_color, (len(mesh_copy.faces), 1))
 
-            if render_mesh.primitives:
-                 render_mesh.primitives[0].color_0 = colors[:, :4]
+                        for face_idx, label_val in face_labels_map.items():
+                            if label_val is not None and face_idx < len(mesh_copy.faces):
+                                color_idx = label_to_color_idx_map.get(label_val)
+                                if color_idx is not None:
+                                    new_face_colors[face_idx] = colors_for_labels[color_idx]
+                                else:
+                                    # This case should ideally not be hit if face_labels_map values are all in unique_labels
+                                    print(f"SamMeshRenderer: Warning - Label {label_val} for face {face_idx} not in unique_labels map.")
+                            elif face_idx >= len(mesh_copy.faces):
+                                print(f"SamMeshRenderer: Warning - Face index {face_idx} from JSON is out of bounds for mesh face count {len(mesh_copy.faces)}.")
+
+
+                        # Ensure the visual type is ColorVisuals to use face/vertex colors
+                        if not isinstance(mesh_copy.visual, trimesh.visual.ColorVisuals):
+                            mesh_copy.visual = trimesh.visual.ColorVisuals()
+                        
+                        mesh_copy.visual.face_colors = new_face_colors
+                        working_mesh = mesh_copy # Use the colored copy
+                        is_colored_copy = True # Set the flag
+                        print(f"SamMeshRenderer: Applied segment colors to {len(face_labels_map)} mapped faces.")
+                else:
+                    print("SamMeshRenderer: Warning - Input mesh for segment coloring has no faces.")
+            except Exception as e:
+                print(f"SamMeshRenderer: Warning - Failed to apply segment colors: {e}. Rendering original mesh.")
+                # working_mesh remains original 'mesh' in case of error
+
+        # If segment colors were applied, render non-smooth (flat), otherwise smooth.
+        # pyrender.Mesh.from_trimesh should handle interpreting working_mesh.visual
+        # (vertex colors if is_colored_copy, or original texture/material otherwise)
+        render_mesh = pyrender.Mesh.from_trimesh(working_mesh, smooth=not is_colored_copy)
+        print(f"SamMeshRenderer: Created pyrender.Mesh. is_colored_copy={is_colored_copy}, smooth={not is_colored_copy}")
+        
+        # --- Pyrender Primitive Appearance Setup (Simplified) ---
+        # Trust pyrender.Mesh.from_trimesh to set up colors/materials based on working_mesh.visual.
+        # Add a fallback default material if the primitive ends up with no appearance.
+        if render_mesh.primitives:
+            primitive = render_mesh.primitives[0]
+            if hasattr(primitive, 'color_0') and primitive.color_0 is not None:
+                print(f"SamMeshRenderer: pyrender.Mesh primitive has vertex colors (color_0). is_colored_copy={is_colored_copy}")
+            elif hasattr(primitive, 'material') and primitive.material is not None:
+                print(f"SamMeshRenderer: pyrender.Mesh primitive has a material: {primitive.material.name}. is_colored_copy={is_colored_copy}")
             else:
-                 print(" [93mWarning: Could not assign vertex colors, mesh has no primitives. [0m")
+                print("SamMeshRenderer: pyrender.Mesh.from_trimesh resulted in no colors or material. Applying default pyrender material.")
+                primitive.material = pyrender.MetallicRoughnessMaterial(
+                    baseColorFactor=[0.8, 0.8, 0.8, 1.0], # Default grey
+                    metallicFactor=0.2,
+                    roughnessFactor=0.6
+                )
         else:
-            material = pyrender.MetallicRoughnessMaterial(
-                baseColorFactor=[0.8, 0.8, 0.8, 1.0],
-                metallicFactor=0.2,
-                roughnessFactor=0.6
-            )
-            if render_mesh.primitives:
-                render_mesh.primitives[0].material = material
-            else:
-                 print(" [93mWarning: Could not assign material, mesh has no primitives. [0m")
+            print("SamMeshRenderer [Warning]: Mesh has no primitives after pyrender.Mesh.from_trimesh.")
 
-
-        scene = pyrender.Scene(bg_color=bg_color[:3], ambient_light=[0.1, 0.1, 0.3])
+        scene = pyrender.Scene(bg_color=bg_color[:3], ambient_light=[0.2, 0.2, 0.2]) # Slightly brighter ambient
         mesh_node = scene.add(render_mesh, pose=np.eye(4), name="mesh")
 
         bounds = mesh.bounds
@@ -693,10 +824,22 @@ class SamMeshRenderer:
 
         renderer = pyrender.OffscreenRenderer(render_resolution, render_resolution)
         rendered_images = {}
+        
+        # Store the directional light node to remove/update it
+        light_node = None
 
         view_keys = ["front", "right", "top", "back"]
         for key in view_keys:
             try:
+                # Remove previous directional light if it exists
+                if light_node is not None and scene.has_node(light_node):
+                    scene.remove_node(light_node)
+                
+                # Add new directional light aligned with the camera
+                # The light's pose is the same as the camera's pose for that view
+                directional_light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.5) # Increased intensity
+                light_node = scene.add(directional_light, pose=poses[key], name=f"light_for_{key}")
+                
                 scene.set_pose(camera_node, poses[key])
                 color, depth = renderer.render(scene)
                 rendered_images[key] = Image.fromarray(color, 'RGB')
