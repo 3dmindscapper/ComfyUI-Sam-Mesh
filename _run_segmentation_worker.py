@@ -4,6 +4,9 @@ import json
 import argparse
 from pathlib import Path
 import traceback
+import torch
+import numpy as np
+import random
 
 # Helper to add paths relative to this script's location
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -66,6 +69,7 @@ def main():
     parser.add_argument("--output_extension", required=True, choices=['glb', 'obj', 'ply'], help="Output mesh format.")
     parser.add_argument("--keep_texture", action='store_true', help="Keep original texture.")
     parser.add_argument("--target_labels", type=int, default=-1, help="Target number of labels (-1 to disable).")
+    parser.add_argument("--seed", type=int, default=None, help="Optional random seed for reproducibility.")
 
     # Config overrides (make them optional, provide defaults matching the node if needed)
     # Defaults should ideally match those in the SamMeshSegmenter node's function signature
@@ -83,6 +87,21 @@ def main():
     parser.add_argument("--samesh_repartition_iterations", type=int, default=1)
 
     args = parser.parse_args()
+
+    # --- Set Seed for Reproducibility --- 
+    if args.seed is not None:
+        print(f"Worker: Setting global seed to: {args.seed}")
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+            # For full reproducibility, you might also need these, but they can impact performance.
+            # torch.backends.cudnn.deterministic = True
+            # torch.backends.cudnn.benchmark = False
+        print(f"Worker: Global seed set.")
+    else:
+        print(f"Worker: No seed provided, results may vary.")
 
     print(f"Worker: Received arguments: {args}")
 

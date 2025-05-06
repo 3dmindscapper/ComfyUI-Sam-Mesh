@@ -129,7 +129,7 @@ class SamModelDownloader:
     def INPUT_TYPES(s):
         return {
             "required": {
-                 "model_name": (SAM_MODEL_NAMES, {"default": SAM_MODEL_NAMES[0]}),
+                 "model_name": (SAM_MODEL_NAMES, {"default": SAM_MODEL_NAMES[0], "tooltip_prompt": "Select the SAM2 Hiera model to download."}),
              }
         }
 
@@ -234,13 +234,11 @@ class SamMeshLoader:
 
         return {
             "required": {
-                # Use file_upload=True for ComfyUI file dialog
-                # "mesh_path": ("STRING", {"default": "", "file_upload": True}),
-                "mesh": (sorted(files) if files else ["No mesh files found"], ),
+                "mesh": (sorted(files) if files else ["No mesh files found"], {"tooltip_prompt": "Select a mesh file from the ComfyUI input directory."}),
             },
             "optional": {
-                "normalize_mesh": ("BOOLEAN", {"default": False}),
-                "process_mesh": ("BOOLEAN", {"default": True}),
+                "normalize_mesh": ("BOOLEAN", {"default": False, "tooltip_prompt": "Normalize the mesh vertices to fit within a unit cube centered at the origin."}),
+                "process_mesh": ("BOOLEAN", {"default": True, "tooltip_prompt": "Enable Trimesh's default processing (e.g., removing duplicate vertices, fixing winding)."}),
             }
         }
 
@@ -301,35 +299,17 @@ class SamMeshSegmenter:
                 "sam_checkpoint_path": ("STRING", {"forceInput": True}), # From Downloader
                 "sam_model_config_path": ("STRING", {"forceInput": True}),# From Downloader
                 # --- User configurable parameters ---
-                "output_directory": ("STRING", {"default": DEFAULT_OUTPUT_DIR}), # Still needed for JSON
-                "cache_directory": ("STRING", {"default": DEFAULT_CACHE_DIR}),
-                "keep_texture": ("BOOLEAN", {"default": False}),
-                # "output_filename_prefix": ("STRING", {"default": "segmented"}), # Worker determines this now
-                # "visualize": ("BOOLEAN", {"default": False}), # Disabled for simplicity
-                # "output_extension": (["glb", "obj", "ply"], {"default": "glb"}), # Worker defaults to glb
-                # --- Simplified Samesh/SAM parameters ---
-                # Using defaults now, uncomment to expose again
-                # "sam_points_per_side": ("INT", {"default": 32, "min": 8, "max": 128, "step": 4}),
-                # "sam_pred_iou_thresh": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 0.95, "step": 0.01}),
-                # "sam_stability_score_thresh": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 0.99, "step": 0.01}),
-                # "sam_stability_score_offset": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1}),
-                # "samesh_min_area": ("INT", {"default": 1024, "min": 0, "max": 100000, "step": 64}),
-                # "samesh_connections_bin_resolution": ("INT", {"default": 100, "min": 10, "max": 500, "step": 10}),
-                # "samesh_connections_bin_thresh_perc": ("FLOAT", {"default": 0.125, "min": 0.01, "max": 0.5, "step": 0.005}),
-                # "samesh_smoothing_thresh_perc_size": ("FLOAT", {"default": 0.025, "min": 0.0, "max": 0.2, "step": 0.005}),
-                # "samesh_smoothing_thresh_perc_area": ("FLOAT", {"default": 0.025, "min": 0.0, "max": 0.2, "step": 0.005}),
-                # "samesh_smoothing_iterations": ("INT", {"default": 64, "min": 0, "max": 256, "step": 8}),
-                # "samesh_repartition_lambda": ("INT", {"default": 6, "min": 0, "max": 20, "step": 1}),
-                # "samesh_repartition_iterations": ("INT", {"default": 1, "min": 0, "max": 10, "step": 1}),
+                "output_directory": ("STRING", {"default": DEFAULT_OUTPUT_DIR, "tooltip_prompt": "Directory to save the face-to-label JSON file and intermediate files."}),
+                "cache_directory": ("STRING", {"default": DEFAULT_CACHE_DIR, "tooltip_prompt": "Directory for samesh to cache rendering or computation results."}),
+                "keep_texture": ("BOOLEAN", {"default": False, "tooltip_prompt": "Attempt to preserve original mesh texture during segmentation."}),
             },
             "optional": {
-                 "target_labels": ("INT", {"default": -1, "min": -1, "max": 10000}), # -1 means disable
+                 "target_labels": ("INT", {"default": -1, "min": -1, "max": 10000, "tooltip_prompt": "Target number of segments (-1 for auto/default behavior."}),
+                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip_prompt": "Random seed for reproducible segmentation results."}),
             }
         }
 
-    # RETURN_TYPES = ("SAM_MESH", "STRING", "STRING",) # Original
-    # RETURN_NAMES = ("segmented_mesh", "output_mesh_path", "face2label_path",) # Original
-    RETURN_TYPES = ("SAM_MESH", "STRING",) # No longer outputting mesh path
+    RETURN_TYPES = ("SAM_MESH", "STRING",)
     RETURN_NAMES = ("segmented_mesh", "face2label_path",)
     FUNCTION = "segment_mesh"
     CATEGORY = "SamMesh"
@@ -338,7 +318,7 @@ class SamMeshSegmenter:
                      sam_checkpoint_path: str, sam_model_config_path: str,
                      output_directory: str, cache_directory: str,
                      keep_texture: bool, target_labels: int = -1,
-                     # Removed other args - they will use defaults now
+                     seed: int = 0
                      ):
 
         # --- Input Validation ---
@@ -362,13 +342,12 @@ class SamMeshSegmenter:
         os.makedirs(cache_directory, exist_ok=True)
 
         # --- Prepare arguments for the worker script ---
-        # Defaults used by worker now for simplified params
-        output_filename_prefix = "segmented" # Hardcode or make internal if needed
-        output_extension = "glb" # Worker uses glb
-        visualize = False # Hardcode off
+        output_filename_prefix = "segmented"
+        output_extension = "glb"
+        visualize = False
 
         cmd = [
-            sys.executable, # Use the same python executable that runs ComfyUI
+            sys.executable,
             WORKER_SCRIPT_PATH,
             "--mesh_path", mesh_path,
             "--sam_checkpoint_path", sam_checkpoint_path,
@@ -378,12 +357,11 @@ class SamMeshSegmenter:
             "--output_filename_prefix", output_filename_prefix,
             "--output_extension", output_extension,
             "--target_labels", str(target_labels),
-            # Config override arguments are removed - worker script uses defaults
         ]
-        # if visualize: # No longer passing visualize
-        #     cmd.append("--visualize")
         if keep_texture:
             cmd.append("--keep_texture")
+        
+        cmd.extend(["--seed", str(seed)])
 
         # --- Prepare Environment for Subprocess ---
         env = os.environ.copy()
@@ -422,7 +400,7 @@ class SamMeshSegmenter:
                  raise FileNotFoundError(f"Segmented mesh file generated by worker not found: {final_output_mesh_path}")
 
             # --- Load the resulting mesh & DELETE intermediate file --- #
-            segmented_colored_mesh = trimesh.load(final_output_mesh_path, force='mesh') # Use standard trimesh loading
+            segmented_colored_mesh = trimesh.load(final_output_mesh_path, force='mesh')
             if not isinstance(segmented_colored_mesh, trimesh.Trimesh):
                  raise TypeError(f"Loaded result mesh is not a Trimesh object (got {type(segmented_colored_mesh)}) from path: {final_output_mesh_path}")
 
@@ -433,7 +411,6 @@ class SamMeshSegmenter:
             except OSError as e:
                  print(f" [93mWarning: Could not delete intermediate segmented mesh file {final_output_mesh_path}: {e} [0m")
 
-            # Return the loaded mesh object and the json path
             return (segmented_colored_mesh, final_output_json_path,)
 
         except subprocess.CalledProcessError as e:
@@ -444,7 +421,7 @@ class SamMeshSegmenter:
             raise RuntimeError(f"Segmentation worker script failed. Check logs for details.") from e
         except json.JSONDecodeError as e:
             print(f"\033[31mError: Could not parse JSON result from worker script stdout.\033[0m")
-            print(f"\033[31mStdout:\n{process.stdout}\033[0m") # Print stdout for debugging
+            print(f"\033[31mStdout:\n{process.stdout}\033[0m")
             raise RuntimeError(f"Failed to parse result from segmentation worker.") from e
         except Exception as e:
             print(f"\033[31mError during segmentation subprocess execution or result loading: {e}\033[0m")
@@ -458,19 +435,18 @@ class SamMeshExporter:
     Exports the segmented mesh as a single GLB file containing a Trimesh Scene.
     Each object in the scene corresponds to one segment, suitable for use with HoloPart.
     """
-    RETURN_TYPES = () # No return value needed for exporter nodes
+    RETURN_TYPES = ()
     FUNCTION = "export_parts"
-    OUTPUT_NODE = True # Mark as output node
+    OUTPUT_NODE = True
     CATEGORY = "SamMesh/Export"
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "segmented_mesh": ("SAM_MESH",), # The mesh with vertex/face colors or metadata
-                "face2label_path": ("STRING", {"forceInput": True}), # Path to the JSON file mapping faces to labels
-                "output_filename": ("STRING", {"default": "holopart_input.glb"}), # Name for the output scene GLB file
-                # "output_format": (["obj", "glb", "ply"], {"default": "obj"}), # Removed, format is now always GLB
+                "segmented_mesh": ("SAM_MESH",),
+                "face2label_path": ("STRING", {"forceInput": True}),
+                "output_filename": ("STRING", {"default": "holopart_input.glb", "tooltip_prompt": "Filename for the exported GLB scene (e.g., 'my_segmented_parts.glb')."}),
             }
         }
 
@@ -479,7 +455,6 @@ class SamMeshExporter:
             raise FileNotFoundError(f"Face-to-label JSON file not found: {face2label_path}")
 
         output_base_dir = folder_paths.get_output_directory()
-        # Ensure filename ends with .glb
         if not output_filename.lower().endswith('.glb'):
             output_filename += '.glb'
             
@@ -501,7 +476,7 @@ class SamMeshExporter:
              raise ValueError(f"Error processing face labels from JSON (ensure keys/values are integers): {e}")
 
         base_mesh = segmented_mesh
-        mesh_parts = [] # List to hold individual segment meshes
+        mesh_parts = []
 
         for label in unique_labels:
             faces_for_label_mask = [idx for idx, lbl in face_labels.items() if lbl == label]
@@ -530,32 +505,28 @@ class SamMeshExporter:
                      )
 
                 mesh_parts.append(segment_mesh)
-                # Removed: segment_mesh.export(output_path, file_type=output_format)
-                # Removed: print(f"SamMeshExporter: Exported {output_path}")
 
             except Exception as e:
                 print(f" [91mSamMeshExporter: Error processing label {label}: {e} [0m")
                 import traceback
                 traceback.print_exc()
-                # Continue to next label if one fails
 
         if not mesh_parts:
             print(f"SamMeshExporter: No mesh parts were generated. Skipping scene export.")
             return {}
 
         try:
-             # Create and export the scene
              scene = trimesh.Scene(mesh_parts)
              print(f"SamMeshExporter: Exporting scene with {len(mesh_parts)} segments to {final_output_path}")
-             scene.export(final_output_path, file_type='glb') # Force GLB format
+             scene.export(final_output_path, file_type='glb')
              print(f"SamMeshExporter: Finished exporting scene.")
         except Exception as e:
              print(f" [91mSamMeshExporter: Error exporting scene to {final_output_path}: {e} [0m")
              import traceback
              traceback.print_exc()
-             raise # Re-raise exception if scene export fails
+             raise
 
-        return {} # Must return empty dict for output nodes
+        return {}
 
 
 # --- SamMeshRenderer Node ---
@@ -571,9 +542,9 @@ class SamMeshRenderer:
              return {"required": {"error": ("STRING", {"default": "pyrender not installed. Node disabled."})}}
         return {
             "required": {
-                "mesh": ("SAM_MESH",), # Input mesh object (can be segmented or original)
-                "render_resolution": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 64}), # Resolution per view
-                "background_color": ("STRING", {"default": "[0.1, 0.1, 0.1, 1.0]"}), # RGBA as string list e.g. "[R, G, B, A]"
+                "mesh": ("SAM_MESH",),
+                "render_resolution": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 64, "tooltip_prompt": "Resolution (width & height) for each of the 4 rendered views."}),
+                "background_color": ("STRING", {"default": "[0.1, 0.1, 0.1, 1.0]", "tooltip_prompt": "Background RGBA color as a string list, e.g., '[R, G, B, A]'. Values 0-1 or 0-255."}),
             }
         }
 
@@ -586,7 +557,6 @@ class SamMeshRenderer:
         try:
             color = json.loads(color_str)
             if isinstance(color, list) and len(color) == 4 and all(isinstance(x, (int, float)) for x in color):
-                # Normalize to 0-1 range if needed (e.g., if user enters 0-255)
                 if any(x > 1.0 for x in color):
                     return [max(0.0, min(255.0, x)) / 255.0 for x in color]
                 else:
@@ -605,48 +575,37 @@ class SamMeshRenderer:
 
         bg_color = self._parse_color(background_color)
 
-        # --- Prepare Mesh for Pyrender ---
-        # Create the mesh geometry first
         render_mesh = pyrender.Mesh.from_trimesh(mesh, smooth=True)
-        material = None # Initialize material
+        material = None
 
-        # Check for vertex colors and assign if they exist
         if hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None and len(mesh.visual.vertex_colors) == len(mesh.vertices):
             colors = mesh.visual.vertex_colors
-            # Ensure colors are RGBA uint8 for pyrender
-            if colors.shape[1] == 3: # If RGB, add alpha
+            if colors.shape[1] == 3:
                 colors = np.hstack((colors[:, :3], np.full((colors.shape[0], 1), 255, dtype=np.uint8)))
             if colors.dtype != np.uint8:
-                 # Normalize if float (assuming 0-1 range), then convert
                  if np.issubdtype(colors.dtype, np.floating):
                      colors = (colors * 255).clip(0, 255)
                  colors = colors.astype(np.uint8)
 
-            # Assign vertex colors to the first primitive (assuming single primitive mesh)
             if render_mesh.primitives:
-                 render_mesh.primitives[0].color_0 = colors[:, :4] # Assign RGBA
+                 render_mesh.primitives[0].color_0 = colors[:, :4]
             else:
                  print(" [93mWarning: Could not assign vertex colors, mesh has no primitives. [0m")
-            # No explicit material needed when using vertex colors
         else:
-            # Use a default PBR material if no vertex colors
             material = pyrender.MetallicRoughnessMaterial(
-                baseColorFactor=[0.8, 0.8, 0.8, 1.0], # Light grey
+                baseColorFactor=[0.8, 0.8, 0.8, 1.0],
                 metallicFactor=0.2,
                 roughnessFactor=0.6
             )
-            # Assign the material to the primitive
             if render_mesh.primitives:
                 render_mesh.primitives[0].material = material
             else:
                  print(" [93mWarning: Could not assign material, mesh has no primitives. [0m")
 
 
-        # --- Setup Scene ---
         scene = pyrender.Scene(bg_color=bg_color[:3], ambient_light=[0.1, 0.1, 0.3])
-        mesh_node = scene.add(render_mesh, pose=np.eye(4), name="mesh") # Use the modified render_mesh
+        mesh_node = scene.add(render_mesh, pose=np.eye(4), name="mesh")
 
-        # --- Camera Setup ---
         bounds = mesh.bounds
         if bounds is None:
              print(" [93mWarning: Mesh bounds could not be determined. Using default camera distance. [0m")
@@ -655,93 +614,97 @@ class SamMeshRenderer:
         else:
             center = mesh.centroid
             scale = np.max(bounds[1] - bounds[0])
-            distance = scale * 1.5 # Closer distance
+            distance = scale * 1.5
 
-        aspect_ratio = 1.0 # Square renders
-        yfov = np.pi / 4.0 # Field of view ~45 degrees
+        aspect_ratio = 1.0
+        yfov = np.pi / 4.0
         camera = pyrender.PerspectiveCamera(yfov=yfov, aspectRatio=aspect_ratio)
-        camera_node = scene.add(camera, pose=np.eye(4)) # Add camera to scene to get a node
+        camera_node = scene.add(camera, pose=np.eye(4))
 
-        # Define 4 camera poses using look_at helper
         def look_at(eye, target, up):
             forward = np.subtract(target, eye)
             forward = forward / np.linalg.norm(forward)
             right = np.cross(forward, up)
-            # Handle degenerate case where forward and up are parallel
             if np.linalg.norm(right) < 1e-6:
-                 # Choose an arbitrary right vector if up is parallel to forward
-                 if abs(forward[1]) < 0.99: # If not pointing straight up/down Y
+                 if abs(forward[1]) < 0.99:
                      right = np.cross(forward, [0, 1, 0])
-                 else: # If pointing straight up/down Y, use X axis
+                 else:
                      right = np.cross(forward, [1, 0, 0])
 
             right = right / np.linalg.norm(right)
-            new_up = np.cross(right, forward) # Recompute up to be orthogonal
+            new_up = np.cross(right, forward)
             new_up = new_up / np.linalg.norm(new_up)
 
             cam_to_world = np.eye(4)
             cam_to_world[0, :3] = right
             cam_to_world[1, :3] = new_up
-            cam_to_world[2, :3] = -forward # OpenGL convention: -Z is forward
+            cam_to_world[2, :3] = -forward
             cam_to_world[:3, 3] = eye
             return cam_to_world
 
 
-        # Define standard camera poses relative to centroid
-        # Assume +Z is up for the mesh by default
         z_up = [0, 0, 1]
         poses = {
-             "front": look_at(center + [0, -distance * 1.2, distance * 0.4], center, z_up), # Slightly elevated front view
-             "right": look_at(center + [distance * 1.2, 0, distance * 0.4], center, z_up),  # Slightly elevated right view
-             "top":   look_at(center + [0, 0, distance * 1.5], center, [0, 1, 0]),    # Top-down view (Y is up for camera)
-             "back":  look_at(center + [0, distance * 1.2, distance * 0.4], center, z_up),   # Slightly elevated back view
+             "front": look_at(center + [0, -distance * 1.2, distance * 0.4], center, z_up),
+             "right": look_at(center + [distance * 1.2, 0, distance * 0.4], center, z_up),
+             "top":   look_at(center + [0, 0, distance * 1.5], center, [0, 1, 0]),
+             "back":  look_at(center + [0, distance * 1.2, distance * 0.4], center, z_up),
         }
 
 
-        # --- Render ---
         renderer = pyrender.OffscreenRenderer(render_resolution, render_resolution)
         rendered_images = {}
 
-        view_keys = ["front", "right", "top", "back"] # Match keys in poses dict
+        view_keys = ["front", "right", "top", "back"]
         for key in view_keys:
             try:
-                scene.set_pose(camera_node, poses[key]) # Set pose for the camera node
-                color, depth = renderer.render(scene) # Color is uint8 numpy array (H, W, 3)
+                scene.set_pose(camera_node, poses[key])
+                color, depth = renderer.render(scene)
                 rendered_images[key] = Image.fromarray(color, 'RGB')
             except Exception as e:
                  print(f" [91mError rendering view {key}: {e} [0m")
                  import traceback
                  traceback.print_exc()
-                 # Create a blank image as placeholder
                  rendered_images[key] = Image.new('RGB', (render_resolution, render_resolution), (50, 50, 50))
 
 
-        # --- Combine Images ---
         grid_size = 1024
-        img_per_view = grid_size // 2 # 512
+        img_per_view = grid_size // 2
         final_image = Image.new('RGB', (grid_size, grid_size))
 
-        # Resize rendered images if they don't match img_per_view (e.g., if render_resolution was different)
         img_front = rendered_images["front"].resize((img_per_view, img_per_view), Image.LANCZOS)
         img_right = rendered_images["right"].resize((img_per_view, img_per_view), Image.LANCZOS)
         img_top = rendered_images["top"].resize((img_per_view, img_per_view), Image.LANCZOS)
         img_back = rendered_images["back"].resize((img_per_view, img_per_view), Image.LANCZOS)
 
-        # Paste into grid:
-        # Top-Left: Front | Top-Right: Right
-        # Bot-Left: Top   | Bot-Right: Back
         final_image.paste(img_front, (0, 0))
         final_image.paste(img_right, (img_per_view, 0))
         final_image.paste(img_top, (0, img_per_view))
         final_image.paste(img_back, (img_per_view, img_per_view))
 
-        renderer.delete() # Release GPU resources
+        renderer.delete()
 
-        # --- Convert to ComfyUI IMAGE format (Tensor) ---
         image_np = np.array(final_image).astype(np.float32) / 255.0
-        image_tensor = torch.from_numpy(image_np)[None,] # Add batch dimension
+        image_tensor = torch.from_numpy(image_np)[None,]
 
         return (image_tensor,)
 
 
-# Add more nodes as needed 
+# Add more nodes as needed
+# Mapping dictionary for node display names
+NODE_CLASS_MAPPINGS = {
+    "SamModelDownloader+SamMesh": SamModelDownloader,
+    "SamMeshLoader+SamMesh": SamMeshLoader,
+    "SamMeshSegmenter+SamMesh": SamMeshSegmenter,
+    "SamMeshExporter+SamMesh": SamMeshExporter,
+    "SamMeshRenderer+SamMesh": SamMeshRenderer,
+}
+
+# Mapping dictionary for node human-readable names
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "SamModelDownloader+SamMesh": "SAM Model Downloader (SamMesh)",
+    "SamMeshLoader+SamMesh": "Load Mesh (SamMesh)",
+    "SamMeshSegmenter+SamMesh": "Segment Mesh with SAM (SamMesh)",
+    "SamMeshExporter+SamMesh": "Export Segmented Mesh for HoloPart (SamMesh)",
+    "SamMeshRenderer+SamMesh": "Render Mesh Views (SamMesh)",
+} 

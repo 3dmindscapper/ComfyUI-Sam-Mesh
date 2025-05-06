@@ -1,9 +1,7 @@
 import numpy as np
 import trimesh
-from trimesh.base import Trimesh, Scene
-
-from samesh.data.common import NumpyTensor, TorchTensor
-
+from trimesh.base import Trimesh, Scene # Ensure Scene is imported here
+from samesh.data.common import NumpyTensor, TorchTensor # Uncommented this line
 
 def duplicate_verts(mesh: Trimesh) -> Trimesh:
     """
@@ -19,7 +17,24 @@ def duplicate_verts(mesh: Trimesh) -> Trimesh:
     verts = mesh.vertices[mesh.faces.reshape(-1), :]
     faces = np.arange(0, verts.shape[0])
     faces = faces.reshape(-1, 3)
-    return Trimesh(vertices=verts, faces=faces, face_colors=mesh.visual.face_colors, process=False)
+
+    kwargs = {'vertices': verts, 'faces': faces, 'process': False}
+    
+    # Check if the mesh has visual information.
+    if hasattr(mesh, 'visual') and mesh.visual is not None:
+        # Only try to use face_colors if mesh.visual is not TextureVisuals
+        # and if it actually has a face_colors attribute that is not None.
+        if not isinstance(mesh.visual, trimesh.visual.TextureVisuals) and \
+           hasattr(mesh.visual, 'face_colors') and \
+           mesh.visual.face_colors is not None:
+            kwargs['face_colors'] = mesh.visual.face_colors
+        # If it is TextureVisuals, or no face_colors are present or they are None,
+        # we don't pass face_colors to the new Trimesh.
+        # The new mesh will be created without explicit face/vertex colors derived from original face_colors.
+        # Textures (UVs, material) would need separate handling if they are to be preserved
+        # on this new geometry, as this function primarily modifies vertex/face structure.
+
+    return Trimesh(**kwargs)
 
 
 def handle_pose(pose: NumpyTensor['4 4']) -> NumpyTensor['4 4']:
