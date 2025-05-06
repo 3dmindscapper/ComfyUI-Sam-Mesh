@@ -483,8 +483,8 @@ class SamMeshSegmenter:
 # --- SamMeshExporter Node ---
 class SamMeshExporter:
     """
-    Exports the segmented mesh, splitting it into parts based on segment labels.
-    Outputs individual mesh files into a specified subdirectory within the ComfyUI output folder.
+    Exports the segmented mesh as a single GLB file containing a Trimesh Scene.
+    Each object in the scene corresponds to one segment, suitable for use with HoloPart.
     """
     RETURN_TYPES = () # No return value needed for exporter nodes
     FUNCTION = "export_parts"
@@ -495,21 +495,25 @@ class SamMeshExporter:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "segmented_mesh": ("SAM_MESH",), # The mesh with vertex/face colors or metadata if samesh provides it
+                "segmented_mesh": ("SAM_MESH",), # The mesh with vertex/face colors or metadata
                 "face2label_path": ("STRING", {"forceInput": True}), # Path to the JSON file mapping faces to labels
-                "output_directory_name": ("STRING", {"default": "exported_segments"}), # Name for the output subfolder
-                "output_format": (["obj", "glb", "ply"], {"default": "obj"}), # Format for exported parts
+                "output_filename": ("STRING", {"default": "holopart_input.glb"}), # Name for the output scene GLB file
+                # "output_format": (["obj", "glb", "ply"], {"default": "obj"}), # Removed, format is now always GLB
             }
         }
 
-    def export_parts(self, segmented_mesh: trimesh.Trimesh, face2label_path: str, output_directory_name: str, output_format: str):
+    def export_parts(self, segmented_mesh: trimesh.Trimesh, face2label_path: str, output_filename: str):
         if not os.path.exists(face2label_path):
             raise FileNotFoundError(f"Face-to-label JSON file not found: {face2label_path}")
 
         output_base_dir = folder_paths.get_output_directory()
-        export_dir = os.path.join(output_base_dir, output_directory_name)
-        os.makedirs(export_dir, exist_ok=True)
-        print(f"SamMeshExporter: Exporting segments to: {export_dir}")
+        # Ensure filename ends with .glb
+        if not output_filename.lower().endswith('.glb'):
+            output_filename += '.glb'
+            
+        final_output_path = os.path.join(output_base_dir, output_filename)
+
+        print(f"SamMeshExporter: Preparing scene for HoloPart input: {final_output_path}")
 
         try:
             with open(face2label_path, 'r') as f:
@@ -517,82 +521,68 @@ class SamMeshExporter:
         except Exception as e:
             raise ValueError(f"Failed to load or parse face2label JSON from {face2label_path}: {e}")
 
-        # Ensure face indices in JSON are integers (sometimes they might be loaded as strings)
         try:
-             # Convert keys (face indices) to integers and values (labels) to integers
             face_labels = {int(k): int(v) for k, v in face2label.items()}
             unique_labels = sorted(list(set(face_labels.values())))
             print(f"SamMeshExporter: Found {len(unique_labels)} unique segment labels.")
         except Exception as e:
              raise ValueError(f"Error processing face labels from JSON (ensure keys/values are integers): {e}")
 
-
-        base_mesh = segmented_mesh # Use the input mesh directly
+        base_mesh = segmented_mesh
+        mesh_parts = [] # List to hold individual segment meshes
 
         for label in unique_labels:
-            # Find faces belonging to the current label
             faces_for_label_mask = [idx for idx, lbl in face_labels.items() if lbl == label]
 
             if not faces_for_label_mask:
                  print(f"SamMeshExporter: Warning - No faces found for label {label}. Skipping.")
                  continue
 
-            # Create a submesh for the current label
-            # We need the original vertices and only the faces for this label
             try:
-                # Trimesh face indexing can be tricky. Ensure mask is usable.
-                # We need the *indices* of the faces in the original mesh that match the label
                 face_indices_for_label = np.array(faces_for_label_mask, dtype=np.int64)
-
-                # Select the faces from the base mesh
                 segment_faces = base_mesh.faces[face_indices_for_label]
-
-                # Create the new mesh. We need to re-index vertices.
-                # `trimesh.Trimesh` constructor with only faces doesn't work directly like this.
-                # We need to get the unique vertices used by these faces and the new face indices relative to those vertices.
                 unique_vertex_indices = np.unique(segment_faces)
                 segment_vertices = base_mesh.vertices[unique_vertex_indices]
-
-                # Map old vertex indices (in base_mesh) to new indices (in segment_vertices)
                 vertex_map = {old_idx: new_idx for new_idx, old_idx in enumerate(unique_vertex_indices)}
-
-                # Create new faces with updated vertex indices
                 new_segment_faces = np.array([
                     [vertex_map[v_idx] for v_idx in face]
                     for face in segment_faces
                 ], dtype=np.int64)
 
-                # Create the final segment mesh
                 segment_mesh = trimesh.Trimesh(vertices=segment_vertices, faces=new_segment_faces)
 
-                # Check if the original mesh had vertex colors and copy them if possible
                 if hasattr(base_mesh, 'visual') and hasattr(base_mesh.visual, 'vertex_colors') and len(base_mesh.visual.vertex_colors) == len(base_mesh.vertices):
                      segment_mesh.visual = trimesh.visual.ColorVisuals(
                          mesh=segment_mesh,
                          vertex_colors=base_mesh.visual.vertex_colors[unique_vertex_indices]
                      )
-                # Check for face colors (less common but possible)
-                # elif hasattr(base_mesh, 'visual') and hasattr(base_mesh.visual, 'face_colors') and len(base_mesh.visual.face_colors) == len(base_mesh.faces):
-                #     segment_mesh.visual = trimesh.visual.ColorVisuals(
-                #         mesh=segment_mesh,
-                #         face_colors=base_mesh.visual.face_colors[face_indices_for_label] # Use the original face indices mask
-                #      )
 
-
-                output_filename = f"segment_{label}.{output_format}"
-                output_path = os.path.join(export_dir, output_filename)
-
-                # Export the submesh
-                segment_mesh.export(output_path, file_type=output_format)
-                print(f"SamMeshExporter: Exported {output_path}")
+                mesh_parts.append(segment_mesh)
+                # Removed: segment_mesh.export(output_path, file_type=output_format)
+                # Removed: print(f"SamMeshExporter: Exported {output_path}")
 
             except Exception as e:
-                print(f"[91mSamMeshExporter: Error processing or exporting label {label}: {e}[0m")
+                print(f" [91mSamMeshExporter: Error processing label {label}: {e} [0m")
                 import traceback
                 traceback.print_exc()
                 # Continue to next label if one fails
 
-        print(f"SamMeshExporter: Finished exporting segments.")
+        if not mesh_parts:
+            print(f"SamMeshExporter: No mesh parts were generated. Skipping scene export.")
+            return {}
+
+        try:
+             # Create and export the scene
+             scene = trimesh.Scene(mesh_parts)
+             print(f"SamMeshExporter: Exporting scene with {len(mesh_parts)} segments to {final_output_path}")
+             scene.export(final_output_path, file_type='glb') # Force GLB format
+             print(f"SamMeshExporter: Finished exporting scene.")
+        except Exception as e:
+             print(f" [91mSamMeshExporter: Error exporting scene to {final_output_path}: {e} [0m")
+             import traceback
+             traceback.print_exc()
+             raise # Re-raise exception if scene export fails
+
         return {} # Must return empty dict for output nodes
 
 
