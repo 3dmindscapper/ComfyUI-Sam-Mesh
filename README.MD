@@ -66,26 +66,31 @@ Here's a brief overview of the nodes provided:
 
 1. SAM Model Downloader (SamMesh)
 Purpose: Downloads SAM2 Hiera model checkpoints and their corresponding configuration YAML files. These are required by the segmentation node.
+
 Inputs:
 model_name: (Dropdown) Select the SAM2 Hiera model to download (e.g., Large, Base+, Small, Tiny).
+
 Outputs:
 sam_checkpoint_path: Path to the downloaded SAM model checkpoint file.
 sam_model_config_path: Path to the downloaded SAM model configuration file.
 
 2. Load Mesh (SamMesh)
 Purpose: Loads 3D mesh files from your ComfyUI/input/ directory.
+
 Inputs:
 mesh: (Dropdown) Select a mesh file from the ComfyUI input directory.
 normalize_mesh: (Boolean, default: False)
 Tooltip: Scales and translates the mesh to fit within a unit cube centered at the origin. Useful for standardizing mesh size for consistent SAM processing, but can alter original scale.
 process_mesh: (Boolean, default: True)
 Tooltip: Enables Trimesh's default processing (e.g., removing duplicate vertices, merging close vertices, fixing face winding). Can help clean up messy geometry but may alter vertex/UV data or topology. Disable if precise original structure is critical, especially with textures.
+
 Outputs:
 sam_mesh: The loaded mesh as a Trimesh object.
 loaded_mesh_path: The absolute file path of the loaded mesh.
 
 3. Segment Mesh with SAM (SamMesh)
 Purpose: Performs the core 3D mesh segmentation using the SAMesh algorithm and a selected SAM model.
+
 Inputs:
 sam_mesh: The Trimesh object from the Load Mesh node.
 mesh_path: The file path of the original mesh (output from Load Mesh).
@@ -98,20 +103,24 @@ Tooltip: If checked, the segmentation process will attempt to preserve the origi
 target_labels: (Integer, default: -1)
 Tooltip: Desired number of distinct segments. Set to -1 for the samesh library's default/automatic behavior. Higher numbers may result in finer-grained segmentation.
 seed: (Integer, default: 0) Random seed for reproducible segmentation results.
+
 Outputs:
 segmented_mesh: The segmented mesh as a Trimesh object. If keep_texture was successful, this mesh will be textured; otherwise, it's typically colored by segment ID by the samesh library.
 face2label_path: Path to a JSON file mapping each face index of the original mesh to a segment label.
 
 4. Export Segmented Mesh for HoloPart (SamMesh)
 Purpose: Exports the segmented mesh as a single GLB file. Each segment is saved as a distinct object within the GLB scene, which can be useful for applications like HoloPart or for importing into 3D modeling software.
+
 Inputs:
 segmented_mesh: The Trimesh object from the Segment Mesh node.
 face2label_path: The path to the face-to-label JSON file (from Segment Mesh).
 output_filename: The desired name for the exported GLB file (e.g., my_segmented_model.glb). It will be saved in your ComfyUI/output/ directory.
+
 Outputs: (This is an output node, so it saves a file but doesn't pass on data via connections).
 
 5. Render Mesh Views (SamMesh)
 Purpose: Renders four standard views (front, right, top, back) of an input mesh and combines them into a single image.
+
 Inputs:
 mesh: The Trimesh object to render.
 render_resolution: (Integer, default: 1024) The resolution (width & height) for each of the 4 views. The final image will be render_resolution*2 x render_resolution*2.
@@ -122,8 +131,11 @@ Tooltip: If checked and face2label_path is provided and valid, this node will re
 
 ## Outputs:
 rendered_views: An IMAGE output suitable for previewing or further processing in ComfyUI.
+
 Example Workflow
-(You can add a screenshot of your nodes connected in a typical workflow here.)
+also embed in the example images above
+![Image](https://github.com/user-attachments/assets/ea5d0b8e-44f9-4bf1-9856-9f760cf340b9)
+
 A basic workflow would be:
 SAM Model Downloader -> Segment Mesh with SAM (checkpoint and config paths)
 Load Mesh -> Segment Mesh with SAM (sam_mesh and mesh_path)
