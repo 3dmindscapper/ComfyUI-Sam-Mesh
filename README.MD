@@ -4,6 +4,9 @@ This project integrates the Segment Any Mesh (SAMesh) library into ComfyUI, prov
 It allows users to load meshes, segment them into parts, and visualize or export the results directly within a ComfyUI workflow.
 
 # Example Images
+![Image](https://github.com/user-attachments/assets/5b7dcf1f-659e-4133-8b1a-71328a82d926)
+
+![Image](https://github.com/user-attachments/assets/283fe77e-c0ef-4fcf-85f3-15f1c9b45054)
 
 ## Features
 
