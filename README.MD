@@ -172,6 +172,6 @@ furnished to do so, subject to the following conditions:
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE
 
-#Acknowledgements
+#  Acknowledgements
 This project is a wrapper around the powerful Segment Any Mesh (SAMesh) library. All credit for the core segmentation algorithm and its implementation goes to the original SAMesh authors: George Tang, William Zhao, Logan Ford, David Benhaim, and Paul Zhang.
 Please refer to the SAMesh GitHub repository and their research paper for more details on the underlying technology.
