@@ -130,9 +130,8 @@ This node requires pyrender. Ensure it's installed correctly via requirements.tx
 You may need to install system libraries for headless OpenGL rendering (like EGL or OSMesa on Linux). See the pyrender documentation.
 Texture Issues with keep_texture: The success of texture preservation depends on the samesh library's capabilities and the input mesh's UV layout. Complex UVs or meshes heavily altered by segmentation might not retain textures perfectly.
 
-## License
-
-# MIT License
+# License
+## MIT License
 
  Copyright (c) 2025 VAST-AI-Research and contributors.
 
@@ -154,6 +153,6 @@ furnished to do so, subject to the following conditions:
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE
 
-##Acknowledgements
+#Acknowledgements
 This project is a wrapper around the powerful Segment Any Mesh (SAMesh) library. All credit for the core segmentation algorithm and its implementation goes to the original SAMesh authors: George Tang, William Zhao, Logan Ford, David Benhaim, and Paul Zhang.
 Please refer to the SAMesh GitHub repository and their research paper for more details on the underlying technology.
