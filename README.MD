@@ -1,3 +1,10 @@
+## Support the Developer
+
+If you find this custom node useful, consider supporting the developer:
+
+[Buy Me a Coffee](https://buymeacoffee.com/3dmindscaper2000)
+
+
 # ComfyUI-Sam-Mesh
 
 This project integrates the Segment Any Mesh (SAMesh) library into ComfyUI, providing a set of custom nodes for performing zero-shot 3D mesh part segmentation using SAM2 (Segment Anything Model 2). 
