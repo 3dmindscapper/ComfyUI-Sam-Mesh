@@ -3,6 +3,8 @@
 This project integrates the Segment Any Mesh (SAMesh) library into ComfyUI, providing a set of custom nodes for performing zero-shot 3D mesh part segmentation using SAM2 (Segment Anything Model 2). 
 It allows users to load meshes, segment them into parts, and visualize or export the results directly within a ComfyUI workflow.
 
+# Example Images
+
 ## Features
 
 Segment 3D meshes into distinct parts using the power of SAM2.
